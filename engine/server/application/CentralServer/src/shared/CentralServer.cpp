@@ -459,6 +459,7 @@ void CentralServer::addGameServer(GameServerConnection * newGameServer)
 	uint32	pid = newGameServer->getProcessId();
 
 	LOG("ServerStartup", ("Adding server %lu for scene %s", pid, newGameServer->getSceneId().c_str()));
+	REPORT_LOG(newGameServer->getSceneId() == "database", ("CentralServer registered database game service %s:%u (pid %lu)\n", newGameServer->getGameServiceAddress().c_str(), static_cast<unsigned int>(newGameServer->getGameServicePort()), pid));
 
 	IGNORE_RETURN(m_gameServers.insert(SceneGameMap::value_type(
 		newGameServer->getSceneId(), newGameServer)));
@@ -743,6 +744,7 @@ void CentralServer::launchStartingProcesses() const
 	if(getCustomerService())
 	{
 		options += getCustomerService()->getBindAddress();
+		options += FormattedString<64>().sprintf(" centralServerPort=%d", getCustomerService()->getBindPort());
 	}
 	else
 	{
@@ -1568,6 +1570,7 @@ void CentralServer::receiveMessage(const MessageDispatch::Emitter & source, cons
 			std::string options = "-s CustomerServiceServer centralServerAddress=";
 			if (CentralServer::getInstance().getCustomerService()) {
 				options += CentralServer::getInstance().getCustomerService()->getBindAddress();
+				options += FormattedString<64>().sprintf(" centralServerPort=%d", CentralServer::getInstance().getCustomerService()->getBindPort());
 			}
 			else {
 				options += NetworkHandler::getHostName();
