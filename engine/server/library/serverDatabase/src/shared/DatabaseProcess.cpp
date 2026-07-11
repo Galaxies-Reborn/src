@@ -89,7 +89,6 @@ m_queryFetchCount(0)
 {
 	ExitChain::add(DatabaseProcess::remove,"DatabaseProcess::remove");
 
-	centralServerConnection = new CentralServerConnection(ConfigServerDatabase::getCentralServerAddress(), ConfigServerDatabase::getCentralServerPort());
 	NetworkSetupData setup;
 	setup.maxConnections = 300;
 	setup.port = 0;
@@ -153,6 +152,8 @@ m_queryFetchCount(0)
 	connectToMessage("FrameEndMessage");
 	connectToMessage("CentralPingMessage");
 	connectToMessage("ExcommunicateGameServerMessage");
+
+	centralServerConnection = new CentralServerConnection(ConfigServerDatabase::getCentralServerAddress(), ConfigServerDatabase::getCentralServerPort());
 
 	m_metricsData = new DatabaseMetricsData;
 	MetricsManager::install(m_metricsData, false, "Database", "", 0);
@@ -424,6 +425,7 @@ void DatabaseProcess::receiveMessage(const MessageDispatch::Emitter & source, co
 			DEBUG_FATAL(centralServerConnection != &source,("Got CentralConnectionOpened from something other than our CentralServer connection.\n"));
 			
 			//TODO:  Make a DatabaseProcessConnect version of this message, perhaps ?
+			REPORT_LOG(true, ("DatabaseProcess advertising game service %s:%u\n", gameService->getBindAddress().c_str(), static_cast<unsigned int>(gameService->getBindPort())));
 			CentralGameServerConnect c("database", "127.0.0.1", 0, gameService->getBindAddress(), gameService->getBindPort()); 
 			centralServerConnection->send(c, true);
 			break;

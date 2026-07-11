@@ -27,6 +27,7 @@ public:
 	static const char*    getChatServiceBindInterface();
 	static const char*    getGameServiceBindInterface();
 	static bool           getWriteTicketToBugLog();
+	static bool           getUseCsAssist();
 private:
 
 	// Disabled

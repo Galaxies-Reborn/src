@@ -626,6 +626,7 @@ void GameServer::connectToDatabaseProcess(std::string const &address, uint16 por
 
 	m_pendingDatabaseProcessConnection = new DatabaseProcessConnection(address, port, pid);
 
+	REPORT_LOG(true, ("Game Server %lu connecting to database process %s:%u (pid %lu)\n", m_processId, address.c_str(), static_cast<unsigned int>(port), pid));
 	LOG("GameGameConnect", ("Game Server %lu is connecting to database process, pid %lu, addr %s port %d", m_processId, pid, address.c_str(), static_cast<int>(port)));
 }
 

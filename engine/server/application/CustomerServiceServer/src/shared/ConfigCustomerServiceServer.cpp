@@ -26,6 +26,7 @@ namespace ConfigCustomerServiceServerNamespace
 	const char* s_chatServiceBindInterface = nullptr;
 	const char* s_gameServiceBindInterface = nullptr;
 	bool         s_writeTicketToBugLog = false;
+	bool         s_useCsAssist = true;
 };
 
 using namespace ConfigCustomerServiceServerNamespace;
@@ -58,6 +59,7 @@ void ConfigCustomerServiceServer::install()
 	KEY_INT    (chatServicePort, 50011);
 	KEY_STRING (chatServiceBindInterface, "");
 	KEY_BOOL   (writeTicketToBugLog, false);
+	KEY_BOOL   (useCsAssist, true);
 }
 
 //-----------------------------------------------------------------------
@@ -162,6 +164,13 @@ const char* ConfigCustomerServiceServer::getChatServiceBindInterface()
 bool ConfigCustomerServiceServer::getWriteTicketToBugLog()
 {
 	return s_writeTicketToBugLog;
+}
+
+//-----------------------------------------------------------------------
+
+bool ConfigCustomerServiceServer::getUseCsAssist()
+{
+	return s_useCsAssist;
 }
 
 //-----------------------------------------------------------------------
