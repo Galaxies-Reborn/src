@@ -55,10 +55,25 @@ string(TOUPPER ${CMAKE_BUILD_TYPE} CMAKE_BUILD_TYPE)
 set(CMAKE_SHARED_LINKER_FLAGS 	"${CMAKE_SHARED_LINKER_FLAGS} -Wl,-z,norelro,-O3,--sort-common,--as-needed,--relax,-z,combreloc,-z,global,--no-omagic")
 set(CMAKE_EXE_LINKER_FLAGS 		"${CMAKE_EXE_LINKER_FLAGS}    -Wl,-z,norelro,-O3,--sort-common,--as-needed,--relax,-z,combreloc,-z,global,--no-omagic")
 
-# Add on flags to strip debug symbols if RELEASE or MINSIZEREL
-if (${CMAKE_BUILD_TYPE} STREQUAL "RELEASE" OR ${CMAKE_BUILD_TYPE} STREQUAL "MINSIZEREL")
+# AddressSanitizer build.  Off by default; this is a diagnostic configuration,
+# not something to ship.  Use a separate build directory so the normal build
+# products are left alone:
+#     cmake -DSWG_ENABLE_ASAN=ON -DCMAKE_BUILD_TYPE=Release <src>
+option(SWG_ENABLE_ASAN "Instrument the build with AddressSanitizer" OFF)
+
+# Add on flags to strip debug symbols if RELEASE or MINSIZEREL.  Stripping is
+# skipped under ASan, which needs the symbols to symbolize its reports.
+if ((${CMAKE_BUILD_TYPE} STREQUAL "RELEASE" OR ${CMAKE_BUILD_TYPE} STREQUAL "MINSIZEREL") AND NOT SWG_ENABLE_ASAN)
 	set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS},-x,-s")
 	set(CMAKE_EXE_LINKER_FLAGS    "${CMAKE_EXE_LINKER_FLAGS},-x,-s")
+endif ()
+
+if (SWG_ENABLE_ASAN)
+	set(CMAKE_C_FLAGS             "${CMAKE_C_FLAGS} -fsanitize=address -fno-omit-frame-pointer -g")
+	set(CMAKE_CXX_FLAGS           "${CMAKE_CXX_FLAGS} -fsanitize=address -fno-omit-frame-pointer -g")
+	set(CMAKE_EXE_LINKER_FLAGS    "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address")
+	set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fsanitize=address")
+	message("AddressSanitizer is ENABLED")
 endif ()
 
 # Compiler specific settings.
