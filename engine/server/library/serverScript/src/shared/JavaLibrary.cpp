@@ -811,7 +811,7 @@ void JavaLibrary::fatalHandler(int signum)
 		void *crashAddress2c = nullptr;
 		void *frameAddressA = nullptr;
 		void *frameAddressB = nullptr;
-		uint32 frameAddressHigh = (reinterpret_cast<uint64>(frameAddress) >> 16);
+		uint64 frameAddressHigh = (reinterpret_cast<uint64>(frameAddress) >> 16);
 		crashAddress2a = __builtin_return_address(0);
 // Suppress Wframe-address for these lines - we could crash the program calling __builtin_return_address and frame_address
 // with non-zero values.  However, we likely don't care as we're crashing at this point anyway due to bad Java.
