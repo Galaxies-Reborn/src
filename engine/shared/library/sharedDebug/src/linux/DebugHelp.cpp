@@ -667,18 +667,37 @@ void DebugHelp::remove()
 
 // ----------------------------------------------------------------------
 
-bool DebugHelp::lookupAddress(uint32 address, char *libName, char *fileName, int fileNameLength, int &line)
+bool DebugHelp::lookupAddress(uint64 address, char *libName, char *fileName, int fileNameLength, int &line)
 {
 	return lookupAddressInfo(reinterpret_cast<void const *>(address), libName, fileName, line, fileNameLength);
 }
 
 // ----------------------------------------------------------------------
 
-void DebugHelp::getCallStack(uint32 *callStack, int sizeOfCallStack)
+void DebugHelp::getCallStack(uint64 *callStack, int sizeOfCallStack)
 {
+	//-- backtrace() writes sizeOfCallStack void* entries. Handing it the
+	//   caller's buffer directly only works when sizeof(void*) happens to
+	//   equal the element size; under LP64 it wrote 8 bytes per entry into a
+	//   4-byte-per-entry array and overran the buffer by 2x. Capture into a
+	//   native pointer array and widen instead, which is correct for both
+	//   ILP32 and LP64.
+	enum { cs_maximumFrameCount = 256 };
+
+	if (sizeOfCallStack <= 0)
+		return;
+
 	for (int i = 0; i < sizeOfCallStack; ++i)
 		callStack[i] = 0;
-	IGNORE_RETURN(backtrace(reinterpret_cast<void **>(callStack), sizeOfCallStack));
+
+	if (sizeOfCallStack > static_cast<int>(cs_maximumFrameCount))
+		sizeOfCallStack = static_cast<int>(cs_maximumFrameCount);
+
+	void *frames[cs_maximumFrameCount];
+	int const frameCount = backtrace(frames, sizeOfCallStack);
+
+	for (int i = 0; i < frameCount; ++i)
+		callStack[i] = reinterpret_cast<uint64>(frames[i]);
 }
 
 // ======================================================================
