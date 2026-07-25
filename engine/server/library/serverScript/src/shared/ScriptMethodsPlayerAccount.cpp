@@ -92,7 +92,11 @@ const JNINativeMethod NATIVES[] = {
 	JF("_isIgnoring", "(JLjava/lang/String;)Z", isIgnoring),
 	JF("_adjustLotCount", "(JI)Z", adjustLotCount),
 	JF("_getAccountNumLots", "(J)I", getAccountNumLots),
-	JF("_getMaxHousingLots", "()I", getMaxHousingLots),
+	// Not declared in dsrc script/base_class.java, so RegisterNatives fails
+	// and aborts registration for this whole namespace. Disabled to match the
+	// other natives dsrc does not declare; re-enable together with a matching
+	// declaration in base_class.java.
+	//JF("_getMaxHousingLots", "()I", getMaxHousingLots),
 	JF("_getGameFeatureBits", "(J)I", getGameFeatureBits),
 	JF("_getSubscriptionFeatureBits", "(J)I", getSubscriptionFeatureBits),
 	JF("_isUsingAdminLogin", "(J)Z", isUsingAdminLogin),
@@ -114,7 +118,8 @@ const JNINativeMethod NATIVES[] = {
 	JF("_renameCharacterReleaseNameReservation", "(J)V", renameCharacterReleaseNameReservation),
 	JF("_renameCharacter", "(JLjava/lang/String;)V", renameCharacter),
 	JF("_getPlayerStationId", "(J)I", getPlayerStationId),
-	JF("_getPlayerUsernameDoNotUse", "(J)Ljava/lang/String;", getPlayerUsername),
+	// Not declared in dsrc script/base_class.java; see note above.
+	//JF("_getPlayerUsernameDoNotUse", "(J)Ljava/lang/String;", getPlayerUsername),
 };
 
 	return JavaLibrary::registerNatives(NATIVES, sizeof(NATIVES)/sizeof(NATIVES[0]));
