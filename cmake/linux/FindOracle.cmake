@@ -37,10 +37,11 @@ if(DEFINED ENV{ORACLE_HOME})
     ${ORACLE_HOME}/OCI/include) # Oracle XE on Windows
 
   set(ORACLE_OCI_NAMES clntsh libclntsh oci)
-  set(ORACLE_NNZ_NAMES libnnz18 nnz18 libnnz21 nnz21 ociw32)
+  set(ORACLE_NNZ_NAMES libnnz18 nnz18 libnnz19 nnz19 libnnz21 nnz21 ociw32)
   set(ORACLE_OCCI_NAMES libocci occi oraocci10 oraocci11)
 
   set(ORACLE_LIB_DIR 
+    ${ORACLE_HOME}
     ${ORACLE_HOME}/lib
     ${ORACLE_HOME}/sdk/lib       # Oracle SDK
     ${ORACLE_HOME}/sdk/lib/msvc
