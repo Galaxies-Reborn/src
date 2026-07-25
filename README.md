@@ -3,7 +3,7 @@
 This is the main server code for SWGSource 1.2 as originally forked from the https://bitbucket.org/stellabellumswg/ repository.  Please see that repository for original publication and alteration credit.
 
 # Works in progress
-* testing-64 - fully 64 bit version thatbuilds but doesn't run, some typedefs and things are wrong
+* 64-bit-types - fully 64 bit version (presently in testing - 11/12/2021) (Special thanks to Apathy for his help in making a 64 bit version happen!)
 
 # Building
 
@@ -11,11 +11,11 @@ This is the main server code for SWGSource 1.2 as originally forked from the htt
 
 **Important**: For versions of clang <= 4 you'll probably have to remove/omit a deprecated CFLAG or two from the CMakelists.txt file
 
-Only use the Debug and Release targets unless you want to work on 64 bit. For local testing, and non-live builds set MODE=Release or MODE=debug in build_linux.sh.
+Only use the Debug and Release targets unless you want to work on 64 bit (MODE=RELWITHDEBINFO). For local testing, and non-live builds set MODE=Release or MODE=debug in build_linux.sh.
 
 For production, user facing builds, set MODE=MINSIZEREL for profile built, heavily optimized versions of the binaries.
 
-## Profiling and Using Profiles
+## Profiling and Using Profiles (IN-WORK)
 
 To generate new profiles, build SWG with MODE=RELWITHDEBINFO. 
 
@@ -35,6 +35,6 @@ See http://clang.llvm.org/docs/UsersManual.html#profiling-with-instrumentation f
 
 # More Information
 
-See http://www.swgsource.com/ for more information on the SWG Source project.
+See https://swg-source.github.io/ for more information on the SWG Source project.
 
 Join the SWGSource Discord if you would like to contribute:  https://discord.gg/j53cMj9

@@ -57,6 +57,17 @@ bool ConsoleCommandParserCollection::performParsing (const NetworkId & userId, c
 
 	UNREF(originalCommand);
 
+    CreatureObject * const playerObject = dynamic_cast<CreatureObject *>(ServerWorld::findObjectByNetworkId(userId));
+    if (!playerObject)
+    {
+        WARNING_STRICT_FATAL(true, ("Console command executed on invalid player object %s", userId.getValueString().c_str()));
+        return false;
+    }
+
+    if (!playerObject->getClient()->isGod()) {
+        return false;
+    }
+
 	// ----------------------------------------------------------------------
 
 	if (isCommand (argv [0], "adjustSlotValue"))
@@ -156,7 +167,7 @@ bool ConsoleCommandParserCollection::performParsing (const NetworkId & userId, c
 				}
 			}
 
-			unsigned long currentValue;
+			uint32_t currentValue;
 			IGNORE_RETURN(p->getCollectionSlotValue(*slot, currentValue));
 
 			result += Unicode::narrowToWide(FormattedString<512>().sprintf("modifying collection slot %s/%s/%s/%s value of %lu by %s for character object %s (%s)\n", slot->collection.page.book.name.c_str(), slot->collection.page.name.c_str(), slot->collection.name.c_str(), Unicode::wideToNarrow(argv[2]).c_str(), currentValue, adjustment.getValueString().c_str(), oid.getValueString().c_str(), Unicode::wideToNarrow(o->getAssignedObjectName()).c_str()));
@@ -228,7 +239,7 @@ bool ConsoleCommandParserCollection::performParsing (const NetworkId & userId, c
 				else
 				{
 					// grant counter-type slot
-					unsigned long currentValue;
+					uint32_t currentValue;
 					IGNORE_RETURN(p->getCollectionSlotValue(**iter, currentValue));
 
 					// quickie way to convert to an int64
@@ -305,7 +316,7 @@ bool ConsoleCommandParserCollection::performParsing (const NetworkId & userId, c
 				else
 				{
 					// grant counter-type slot
-					unsigned long currentValue;
+					uint32_t currentValue;
 					IGNORE_RETURN(p->getCollectionSlotValue(**iter, currentValue));
 
 					// quickie way to convert to an int64
@@ -382,7 +393,7 @@ bool ConsoleCommandParserCollection::performParsing (const NetworkId & userId, c
 				else
 				{
 					// grant counter-type slot
-					unsigned long currentValue;
+					uint32_t currentValue;
 					IGNORE_RETURN(p->getCollectionSlotValue(**iter, currentValue));
 
 					// quickie way to convert to an int64
@@ -445,7 +456,7 @@ bool ConsoleCommandParserCollection::performParsing (const NetworkId & userId, c
 				else
 				{
 					// revoke counter-type slot
-					unsigned long currentValue;
+					uint32_t currentValue;
 					IGNORE_RETURN(p->getCollectionSlotValue(**iter, currentValue));
 
 					// quickie way to convert to an int64
@@ -508,7 +519,7 @@ bool ConsoleCommandParserCollection::performParsing (const NetworkId & userId, c
 				else
 				{
 					// revoke counter-type slot
-					unsigned long currentValue;
+					uint32_t currentValue;
 					IGNORE_RETURN(p->getCollectionSlotValue(**iter, currentValue));
 
 					// quickie way to convert to an int64
@@ -571,7 +582,7 @@ bool ConsoleCommandParserCollection::performParsing (const NetworkId & userId, c
 				else
 				{
 					// revoke counter-type slot
-					unsigned long currentValue;
+					uint32_t currentValue;
 					IGNORE_RETURN(p->getCollectionSlotValue(**iter, currentValue));
 
 					// quickie way to convert to an int64
@@ -640,7 +651,7 @@ bool ConsoleCommandParserCollection::performParsing (const NetworkId & userId, c
 						}
 						else
 						{
-							unsigned long value;
+							uint32_t value;
 							IGNORE_RETURN(p->getCollectionSlotValue(**iterSlot, value));
 							if (value == 0)
 								continue;

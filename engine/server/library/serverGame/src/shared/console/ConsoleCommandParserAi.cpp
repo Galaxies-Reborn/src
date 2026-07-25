@@ -107,6 +107,17 @@ bool ConsoleCommandParserAi::performParsing(const NetworkId & userId, const Stri
 	UNREF (userId);
 	UNREF(originalCommand);
 
+    CreatureObject * const playerObject = dynamic_cast<CreatureObject *>(ServerWorld::findObjectByNetworkId(userId));
+    if (!playerObject)
+    {
+        WARNING_STRICT_FATAL(true, ("Console command executed on invalid player object %s", userId.getValueString().c_str()));
+        return false;
+    }
+
+    if (!playerObject->getClient()->isGod()) {
+        return false;
+    }
+
 	FormattedString<1024> fs;
 
 	if (isAbbrev(argv[0], "log"))
@@ -261,12 +272,12 @@ bool ConsoleCommandParserAi::performParsing(const NetworkId & userId, const Stri
 
 				// Hate Over Time List
 				{
-					std::map<NetworkId, std::pair<float, std::pair<unsigned long, unsigned long> > > const & hateOverTime = aiCreatureController->getCreature()->getHateOverTime();
+					std::map<NetworkId, std::pair<float, std::pair<uint32_t, uint32_t> > > const & hateOverTime = aiCreatureController->getCreature()->getHateOverTime();
 					if (!hateOverTime.empty())
 					{
 						result += Unicode::narrowToWide(fs.sprintf("* HATE OVER TIME LIST currentGameTime=(%lu)*\n", ServerClock::getInstance().getGameTimeSeconds()));
 
-						for (std::map<NetworkId, std::pair<float, std::pair<unsigned long, unsigned long> > >::const_iterator iter = hateOverTime.begin(); iter != hateOverTime.end(); ++iter)
+						for (std::map<NetworkId, std::pair<float, std::pair<uint32_t, uint32_t> > >::const_iterator iter = hateOverTime.begin(); iter != hateOverTime.end(); ++iter)
 						{
 							CachedNetworkId const hateTarget(iter->first);
 							TangibleObject const * const hateTargetTangibleObject = TangibleObject::asTangibleObject(hateTarget.getObject());
@@ -358,12 +369,12 @@ bool ConsoleCommandParserAi::performParsing(const NetworkId & userId, const Stri
 
 				// Hate Over Time List
 				{
-					std::map<NetworkId, std::pair<float, std::pair<unsigned long, unsigned long> > > const & hateOverTime = to->getHateOverTime();
+					std::map<NetworkId, std::pair<float, std::pair<uint32_t, uint32_t> > > const & hateOverTime = to->getHateOverTime();
 					if (!hateOverTime.empty())
 					{
 						result += Unicode::narrowToWide(fs.sprintf("* HATE OVER TIME LIST currentGameTime=(%lu)*\n", ServerClock::getInstance().getGameTimeSeconds()));
 
-						for (std::map<NetworkId, std::pair<float, std::pair<unsigned long, unsigned long> > >::const_iterator iter = hateOverTime.begin(); iter != hateOverTime.end(); ++iter)
+						for (std::map<NetworkId, std::pair<float, std::pair<uint32_t, uint32_t> > >::const_iterator iter = hateOverTime.begin(); iter != hateOverTime.end(); ++iter)
 						{
 							CachedNetworkId const hateTarget(iter->first);
 							TangibleObject const * const hateTargetTangibleObject = TangibleObject::asTangibleObject(hateTarget.getObject());

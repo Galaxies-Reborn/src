@@ -193,9 +193,6 @@ const SharedObjectTemplate * CreatureObject::m_defaultSharedTemplate = nullptr;
 
 //----------------------------------------------------------------------
 
-// The max number of lots available to a player.  This value is also defined in base_class.java
-static const int HOUSING_MAX_LOTS = 10;
-
 // Slot names
 static const ConstCharCrcLowerString DATAPAD_SLOT_NAME("datapad");
 
@@ -485,7 +482,7 @@ namespace CreatureObjectNamespace
 	{
 		bool creatureIsContainedInPOBShip(CreatureObject const * creatureObject);
 		void findAllTargetsForGroup(CreatureObject * const targetObj, std::vector<CreatureObject *> & targets);
-		bool roomInGroup(GroupObject const * groupObj, int additionalMembers);
+		bool roomInGroup(GroupObject const * groupObj, uint32_t additionalMembers);
 		GroupMemberParam const buildGroupMemberParam(CreatureObject const * creatureObject);
 		void buildGroupMemberParamsFromCreatures(std::vector<CreatureObject *> const & targets, GroupObject::GroupMemberParamVector & targetMemberParams);
 	}
@@ -869,6 +866,8 @@ CreatureObject::CreatureObject(const ServerCreatureObjectTemplate* newTemplate) 
 	IGNORE_RETURN(g_creatureList.insert(this));
 
 	ObjectTracker::addCreature();
+
+	m_maxHousingLots = ConfigServerGame::getMaxHousingLots();
 }
 
 //-----------------------------------------------------------------------
@@ -6231,7 +6230,7 @@ void CreatureObject::setMood(uint32 mood)
 	}
 	else
 	{
-		sendControllerMessageToAuthServer(CM_setMood, new MessageQueueGenericValueType<unsigned long>(mood));
+		sendControllerMessageToAuthServer(CM_setMood, new MessageQueueGenericValueType<uint32_t>(mood));
 	}
 }
 
@@ -6656,7 +6655,7 @@ void CreatureObject::setSayMode(uint32 sayMode)
 	}
 	else
 	{
-		sendControllerMessageToAuthServer(CM_setSayMode, new MessageQueueGenericValueType<unsigned long>(sayMode));
+		sendControllerMessageToAuthServer(CM_setSayMode, new MessageQueueGenericValueType<uint32_t>(sayMode));
 	}
 }
 
@@ -8723,7 +8722,7 @@ void CreatureObject::setGuildId(int guildId)
 
 //-----------------------------------------------------------------------
 
-void CreatureObject::setTimeToUpdateGuildWarPvpStatus(unsigned long timeToUpdateGuildWarPvpStatus)
+void CreatureObject::setTimeToUpdateGuildWarPvpStatus(uint32_t timeToUpdateGuildWarPvpStatus)
 {
 	FATAL(!isAuthoritative(), ("setTimeToUpdateGuildWarPvpStatus called on nonauthoritative object"));
 	m_timeToUpdateGuildWarPvpStatus = timeToUpdateGuildWarPvpStatus;
@@ -11915,7 +11914,7 @@ void CreatureObject::runMissionCreationQueue()
 
 int CreatureObject::getMaxNumberOfLots() const
 {
-	return HOUSING_MAX_LOTS;
+	return m_maxHousingLots;
 }
 
 //----------------------------------------------------------------------
@@ -13511,7 +13510,7 @@ void CreatureObject::pushedMe(const NetworkId & attackerId,
  * @param slopeAngle	the angle of the "hill", in radians
  * @param expireTime	the game time when the effect expires
  */
-void CreatureObject::addSlowDownEffect(const TangibleObject & defender, float coneLength, float coneAngle, float slopeAngle, unsigned long expireTime)
+void CreatureObject::addSlowDownEffect(const TangibleObject & defender, float coneLength, float coneAngle, float slopeAngle, uint32_t expireTime)
 {
 	if (isAuthoritative())
 	{
@@ -13554,7 +13553,7 @@ void CreatureObject::addSlowDownEffect(const TangibleObject & defender, float co
  *
  * @return true if the effect was added, false if the creature already had a slow down effect
  */
-bool CreatureObject::addSlowDownEffectProxy(const TangibleObject & defender, float coneLength, float coneAngle, float slopeAngle, unsigned long expireTime)
+bool CreatureObject::addSlowDownEffectProxy(const TangibleObject & defender, float coneLength, float coneAngle, float slopeAngle, uint32_t expireTime)
 {
 	// if we already are doing a slowdown, don't do another
 	Property * property = getProperty(SlowDownProperty::getClassPropertyId());
@@ -14236,7 +14235,7 @@ void CreatureObject::setRegenRate(Attributes::Enumerator poolAttrib, float value
 
 // ----------------------------------------------------------------------
 
-void CreatureObject::setLastWaterDamageTime(unsigned long newTime)
+void CreatureObject::setLastWaterDamageTime(uint32_t newTime)
 {
 	m_lastWaterDamageTime = newTime;
 }
@@ -14535,6 +14534,18 @@ int CreatureObject::getRemainingExpertisePoints() const
 
 bool CreatureObject::processExpertiseRequest(std::vector<std::string> const &addExpertisesNamesList, bool clearAllExpertisesFirst)
 {
+	
+	// if you are in god mode, grant the expertise without permission checks
+	if(getClient()->isGod()) {
+		for(std::vector<std::string>::const_iterator i = addExpertisesNamesList.begin(); i != addExpertisesNamesList.end(); ++i) {
+			std::string const &s = *i;
+			const SkillObject *skill = SkillManager::getInstance().getSkill(s);
+			grantSkill(*skill);
+			Chat::sendSystemMessage(*this, Unicode::narrowToWide(FormattedString<256>().sprintf("GOD MODE: Granting you expertise skill %s without regard for points, requisites, or permissions, because you are in God Mode.", skill->getSkillName().c_str())), Unicode::emptyString);
+		}
+		return true;
+	}
+	
 	for(std::vector<std::string>::const_iterator i = addExpertisesNamesList.begin(); i != addExpertisesNamesList.end(); ++i)
 	{
 		std::string const &s = *i;
@@ -14984,14 +14995,13 @@ void CreatureObjectNamespace::GroupHelpers::findAllTargetsForGroup(CreatureObjec
 
 // ----------------------------------------------------------------------
 
-bool CreatureObjectNamespace::GroupHelpers::roomInGroup(GroupObject const * groupObj, int additionalMembers)
+bool CreatureObjectNamespace::GroupHelpers::roomInGroup(GroupObject const * groupObj, uint32_t additionalMembers)
 {
 	if (groupObj != 0)
 	{
 		return groupObj->doesGroupHaveRoomFor(additionalMembers);
 	}
 
-	additionalMembers = std::max(0, additionalMembers);
 	return additionalMembers < GroupObject::maximumMembersInGroup();
 }
 
@@ -15334,7 +15344,7 @@ void CreatureObject::addPackedAppearanceWearable(std::string const &appearanceDa
 void CreatureObject::saveDecorationLayout(ServerObject const & pobSourceObject, int saveSlotNumber, std::string const & description)
 {
 	int debugNumItems = 0;
-	const unsigned long debugStartTimeMs = Clock::timeMs();
+	const uint32_t debugStartTimeMs = Clock::timeMs();
 
 	if (!isAuthoritative())
 		return;
@@ -15528,7 +15538,7 @@ void CreatureObject::saveDecorationLayout(ServerObject const & pobSourceObject, 
 
 	if ((debugNumItems > 0) && getClient()->isGod())
 	{
-		const unsigned long debugEndTimeMs = Clock::timeMs();
+		const uint32_t debugEndTimeMs = Clock::timeMs();
 		Chat::sendSystemMessage(*this, Unicode::narrowToWide(FormattedString<256>().sprintf("!!!GOD MODE STATISTICS!!! %d items saved in %lums", debugNumItems, (debugEndTimeMs - debugStartTimeMs))), Unicode::emptyString);
 	}
 }
@@ -15537,7 +15547,7 @@ void CreatureObject::saveDecorationLayout(ServerObject const & pobSourceObject, 
 
 void CreatureObject::restoreDecorationLayout(ServerObject const & pobTargetObject, int saveSlotNumber)
 {
-	const unsigned long debugStartTimeMs = Clock::timeMs();
+	const uint32_t debugStartTimeMs = Clock::timeMs();
 
 	if (!isAuthoritative())
 		return;
@@ -15873,7 +15883,7 @@ void CreatureObject::restoreDecorationLayout(ServerObject const & pobTargetObjec
 
 	if ((debugNumItems > 0) && getClient()->isGod())
 	{
-		const unsigned long debugEndTimeMs = Clock::timeMs();
+		const uint32_t debugEndTimeMs = Clock::timeMs();
 		Chat::sendSystemMessage(*this, Unicode::narrowToWide(FormattedString<256>().sprintf("!!!GOD MODE STATISTICS!!! %d items read (%d will be moved) in %lums", debugNumItems, numItemsToBeMoved, (debugEndTimeMs - debugStartTimeMs))), Unicode::emptyString);
 	}
 }

@@ -18,6 +18,10 @@
 #include "sharedFoundation/FormattedString.h"
 #include "sharedGame/ProsePackage.h"
 #include "sharedGame/ProsePackageParticipant.h"
+#include "serverScript/GameScriptObject.h"
+#include "serverScript/ScriptDictionary.h"
+#include "serverScript/ScriptFunctionTable.h"
+#include "serverScript/ScriptParameters.h"
 #include "sharedLog/Log.h"
 #include "sharedNetworkMessages/ChatAvatarId.h"
 #include "sharedNetworkMessages/ChatOnRequestLog.h"
@@ -50,12 +54,12 @@ namespace ReportManagerNamespace
 	typedef std::map<unsigned int, ReportData> ReportList;
 	ReportList s_reportList;
 
-	typedef std::map<NetworkId, time_t> ReportThrottle;
+	typedef std::map<NetworkId, uint32_t> ReportThrottle;
 	ReportThrottle s_reportThrottle;
 
-	time_t const s_throttleTime = 10; // seconds
-	time_t const s_throttleCleanupTime = 60; // seconds
-	time_t s_throttleCleanupTimer = 0; // seconds
+	uint32_t const s_throttleTime = 10; // seconds
+	uint32_t const s_throttleCleanupTime = 60; // seconds
+	uint32_t s_throttleCleanupTimer = 0; // seconds
 }
 
 using namespace ReportManagerNamespace;
@@ -110,7 +114,7 @@ void ReportManager::addReport(Unicode::String const &reportingName, NetworkId co
 {
 	// Remove any expired throttling
 
-	time_t const systemTime = Os::getRealSystemTime();
+	uint32_t const systemTime = Os::getRealSystemTime();
 
 	if ((systemTime - s_throttleCleanupTimer) > s_throttleCleanupTime)
 	{
@@ -219,7 +223,7 @@ void ReportManager::handleMessage(ChatOnRequestLog const &chatOnRequestLog)
 
 		report.append(header);
 
-		typedef std::multimap<time_t, Unicode::String> SortedChatLog;
+		typedef std::multimap<uint32_t, Unicode::String> SortedChatLog;
 		typedef std::set<Unicode::String> SortedFromPlayers;
 		SortedChatLog sortedChatLog;
 		SortedFromPlayers sortedFromPlayers;
@@ -262,7 +266,7 @@ void ReportManager::handleMessage(ChatOnRequestLog const &chatOnRequestLog)
 			Unicode::String toPlayer;
 			Unicode::String text;
 			Unicode::String channel;
-			time_t time;
+			uint32_t time;
 
 			for (; iterChatLog != chatLog.end(); ++iterChatLog)
 			{
@@ -331,10 +335,18 @@ void ReportManager::handleMessage(ChatOnRequestLog const &chatOnRequestLog)
 			report.append(reportData.m_clientData);
 		}
 
-		if (!reportData.m_reportLogChannel.empty())
-			LOGU("CustomerService", (reportData.m_reportLogChannel.c_str()), report);
-		else
-			LOGU("CustomerService", ("Report:"), report);
+		//if (!reportData.m_reportLogChannel.empty())
+		//	LOGU("CustomerService", (reportData.m_reportLogChannel.c_str()), report);
+		//else
+		//	LOGU("CustomerService", ("Report:"), report);
+	
+		if(reportingCreatureObject->getScriptObject())
+		{
+			ScriptParams p;
+			p.addParam(reportData.m_harassingNetworkId);
+			p.addParam(report);
+			IGNORE_RETURN(reportingCreatureObject->getScriptObject()->trigAllScripts(Scripting::TRIG_ON_PLAYER_REPORTED_CHAT, p));
+		}
 		
 		// System message for success
 		

@@ -570,7 +570,8 @@ TangibleObject::~TangibleObject()
 				// look up the caller's file and line
 				if (callStack[callStackOffset])
 				{
-					char lib[4 * 1024] = { '\0' };
+					// unused.
+					// char lib[4 * 1024] = { '\0' };
 					char file[4 * 1024] = { '\0' };
 					int line = 0;
 					REPORT_LOG(true, ("\tCall stack:"));
@@ -2341,8 +2342,8 @@ void TangibleObject::addHateOverTime(NetworkId const & target, float const hate,
 
 	if (isAuthoritative())
 	{
-		unsigned long const currentGameTime =  ServerClock::getInstance().getGameTimeSeconds();
-		unsigned long const endGameTime = currentGameTime + seconds;
+		uint32_t const currentGameTime =  ServerClock::getInstance().getGameTimeSeconds();
+		uint32_t const endGameTime = currentGameTime + seconds;
 
 		IGNORE_RETURN(addHate(target, hate));
 
@@ -4032,6 +4033,12 @@ bool TangibleObject::isVisibleOnClient(Client const &client) const
 	// Gods and clients on the buildcluster can see everything.
 	if (client.isGod() || ConfigServerGame::getBuildCluster() || (isVisible() && !isHidden()))
 		return true;
+	
+	// fix for yet another buyback container exploit
+	if(this->getScriptObject()->hasScript("object.buyback"))
+	{
+		return false;
+	}
 
 	// Invisible objects are visible to a non-god client if the client's
 	// creature contains (or indirectly contains) the invisible object.
@@ -4919,6 +4926,11 @@ void TangibleObject::getAttributes(AttributeVector & data) const
 		{
 			data.push_back(std::make_pair(SharedObjectAttributes::no_trade, Unicode::emptyString));
 
+			if (markedNoTradeRemovable())
+			{
+				data.push_back(std::make_pair(SharedObjectAttributes::no_trade_removable, Unicode::emptyString));
+			}
+
 			if (markedNoTradeShared(true))
 			{
 				data.push_back(std::make_pair(SharedObjectAttributes::no_trade_shared, Unicode::emptyString));
@@ -4930,6 +4942,11 @@ void TangibleObject::getAttributes(AttributeVector & data) const
 			if (gso && gso->hasScript(NOMOVE_SCRIPT))
 			{
 				data.push_back(std::make_pair(SharedObjectAttributes::no_trade, Unicode::emptyString));
+
+				if (markedNoTradeRemovable())
+				{
+					data.push_back(std::make_pair(SharedObjectAttributes::no_trade_removable, Unicode::emptyString));
+				}
 
 				if (markedNoTradeShared(false))
 				{
@@ -5133,9 +5150,9 @@ void TangibleObject::handleCMessageTo(const MessageToPayload &message)
 		if (!m_hateOverTime.empty())
 		{
 			std::list<NetworkId> expired;
-			unsigned long const currentGameTime =  ServerClock::getInstance().getGameTimeSeconds();
+			uint32_t const currentGameTime =  ServerClock::getInstance().getGameTimeSeconds();
 
-			for (std::map<NetworkId, std::pair<float, std::pair<unsigned long, unsigned long> > >::const_iterator iter = m_hateOverTime.begin(); iter != m_hateOverTime.end(); ++iter)
+			for (std::map<NetworkId, std::pair<float, std::pair<uint32_t, uint32_t> > >::const_iterator iter = m_hateOverTime.begin(); iter != m_hateOverTime.end(); ++iter)
 			{
 				if (iter->second.second.first < currentGameTime)
 				{
@@ -5344,6 +5361,16 @@ bool TangibleObject::isOnAdminList(const CreatureObject& player) const
 
 	if(player.getClient() && player.getClient()->isGod())
 		return true;
+
+	if(getObjVars().hasItem("player_structure.admin_all_characters"))
+    {
+	    static int suid;
+	    getObjVars().getItem("player_structure.admin_all_characters", suid);
+	    if(NameManager::getInstance().getPlayerStationId(player.getNetworkId()) == suid)
+        {
+	        return true;
+        }
+    }
 
 	// In script, the admin list is stored as a list of strings.
 	// The format of the list is:
@@ -6155,6 +6182,14 @@ void TangibleObject::forceHateTarget(NetworkId const & target)
 
 bool TangibleObject::isUserOnAccessList(NetworkId const user) const
 {
+    ServerObject * sourceObject = safe_cast<ServerObject *>(NetworkIdManager::getObjectById(user));
+    if(sourceObject)
+    {
+        if(sourceObject->getClient()->isGod())
+        {
+            return true;
+        }
+    }
 	return (std::find(m_accessList.begin(), m_accessList.end(), user) != m_accessList.end());
 }
 

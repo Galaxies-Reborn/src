@@ -384,9 +384,7 @@ class ConfigServerGame
 		float           buddyPointTimeBonus; // buddy points can add to the player's entitlement time for veteran rewards
 		bool		enableSceneGlobalData;
 
-#ifdef _DEBUG
 		float           manufactureTimeOverride;
-#endif
 
 		// max time we allow for creating theater objects in a frame
 		int             theaterCreationLimitMilliseconds;
@@ -577,6 +575,8 @@ class ConfigServerGame
 		bool			useOldSuidGenerator;
 
 		const char *    serverLoadLevel;
+
+		int             maxHousingLots;
 	};
 
   private:
@@ -911,9 +911,7 @@ class ConfigServerGame
 	static float            getBuddyPointTimeBonus();
 	static bool             getEnableSceneGlobalData();
 
-#ifdef _DEBUG
 	static float            getManufactureTimeOverride();
-#endif
 
 	static int              getTheaterCreationLimitMilliseconds();
 
@@ -1065,6 +1063,8 @@ class ConfigServerGame
 	static bool				getUseOldSuidGenerator();
 
 	static const char *     getServerLoadLevel();
+
+	static int              getMaxHousingLots();
 };
 
 //-----------------------------------------------------------------------
@@ -2811,12 +2811,11 @@ inline int ConfigServerGame::getMinEntitledTime()
 }
 
 // ----------------------------------------------------------------------
-#ifdef _DEBUG
+
 inline float ConfigServerGame::getManufactureTimeOverride()
 {
 	return data->manufactureTimeOverride;
 }
-#endif
 
 // ----------------------------------------------------------------------
 
@@ -3705,6 +3704,13 @@ inline bool ConfigServerGame::getUseOldSuidGenerator() {
 inline const char *ConfigServerGame::getServerLoadLevel()
 {
 	return data->serverLoadLevel;
+}
+
+//-----------------------------------------------------------------------
+
+inline int ConfigServerGame::getMaxHousingLots(void)
+{
+	return data->maxHousingLots;
 }
 
 #endif

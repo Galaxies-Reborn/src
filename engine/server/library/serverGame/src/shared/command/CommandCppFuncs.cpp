@@ -1104,6 +1104,13 @@ static void commandFuncAdminTeleport(Command const &, NetworkId const &actor, Ne
 
 	if (teleportObj)
 	{
+		
+		// prevents teleporting anything but creatures/players so GMs can't teleport buildings accidentally
+		// note: /object commands can still be used to move non-player objects
+		if (!GameObjectTypes::isTypeOf(teleportObj->getGameObjectType(), SharedObjectTemplate::GOT_creature)) {
+			return;	
+		}
+		
 		// if the person teleporting is the owner of the containing ship, move the ship instead
 		ShipObject * const ship = getAttachedShip(teleportObj->asCreatureObject());
 		if (ship)
@@ -1793,11 +1800,11 @@ static void commandFuncSpatialChatInternal(Command const &, NetworkId const &act
 				else if (!squelched && (ConfigServerGame::getChatSpamNotifyPlayerWhenLimitedIntervalSeconds() > 0) && obj->getClient())
 				{
 					// send message telling character he can no longer talk
-					const int timeNow = static_cast<int>(::time(nullptr));
-					const int chatSpamTimeEndInterval = playerObject->getChatSpamTimeEndInterval();
+					const int32_t timeNow = static_cast<int32_t>(::time(nullptr));
+					const int32_t chatSpamTimeEndInterval = playerObject->getChatSpamTimeEndInterval();
 					if ((chatSpamTimeEndInterval > timeNow) && (timeNow >= playerObject->getChatSpamNextTimeToNotifyPlayerWhenLimited()))
 					{
-						GenericValueTypeMessage<int> csl("ChatSpamLimited", (chatSpamTimeEndInterval - timeNow));
+						GenericValueTypeMessage<int32_t> csl("ChatSpamLimited", (chatSpamTimeEndInterval - timeNow));
 						obj->getClient()->send(csl, true);
 
 						playerObject->setChatSpamNextTimeToNotifyPlayerWhenLimited((timeNow + ConfigServerGame::getChatSpamNotifyPlayerWhenLimitedIntervalSeconds()));
@@ -1930,8 +1937,8 @@ static void commandFuncSpatialChat(Command const &, NetworkId const &actor, Netw
 				else if (!squelched && (ConfigServerGame::getChatSpamNotifyPlayerWhenLimitedIntervalSeconds() > 0) && obj->getClient())
 				{
 					// send message telling character he can no longer talk
-					const int timeNow = static_cast<int>(::time(nullptr));
-					const int chatSpamTimeEndInterval = playerObject->getChatSpamTimeEndInterval();
+					const int32_t timeNow = static_cast<int32_t>(::time(nullptr));
+					const int32_t chatSpamTimeEndInterval = playerObject->getChatSpamTimeEndInterval();
 					if ((chatSpamTimeEndInterval > timeNow) && (timeNow >= playerObject->getChatSpamNextTimeToNotifyPlayerWhenLimited()))
 					{
 						GenericValueTypeMessage<int> csl("ChatSpamLimited", (chatSpamTimeEndInterval - timeNow));
@@ -2859,21 +2866,51 @@ static void commandFuncFactoryCrateSplit(Command const &, NetworkId const &actor
 static void commandFuncPermissionListModify(Command const &, NetworkId const &actor, NetworkId const &target, Unicode::String const &params)
 {
 	CreatureObject *actorObj = dynamic_cast<CreatureObject *>(NetworkIdManager::getObjectById(actor));
-	if (actorObj && actorObj->getClient())
+
+    if (actorObj && actorObj->getClient())
 	{
-		size_t curpos = 0;
-		const Unicode::String & playerName = Unicode::narrowToWide(nextStringParm(params, curpos));
-		const Unicode::String & listName = Unicode::narrowToWide(nextStringParm(params, curpos));
-		const Unicode::String & action = Unicode::narrowToWide(nextStringParm(params, curpos));
-
-		ScriptParams params;
-		params.addParam(actor);
-		params.addParam(playerName);
-		params.addParam(listName);
-		params.addParam(action);
-
-		//now trigger the script, the actor should have exactly one on himself
-		actorObj->getScriptObject()->trigAllScripts(Scripting::TRIG_PERMISSION_LIST_MODIFY, params);
+	    // unlike the other options we can get passed, a city name will contain spaces (most likely)
+	    // and because of the order of the params here, we have to do some special handling to grab
+	    // the entire city name, like "city:Pits of Karkoon" without the trailing params of listName
+	    if(Unicode::wideToNarrow(params).rfind("city:", 0) == 0)
+        {
+            Unicode::UnicodeStringVector tokens;
+            Unicode::tokenize(params, tokens);
+            Unicode::String temp;
+            for (uint32_t i = 0; i < tokens.size(); i++)
+            {
+                if(i < tokens.size() - 2)
+                {
+                    temp += tokens[i];
+                    if(i < tokens.size() -3)
+                    {
+                        temp += Unicode::narrowToWide(" ");
+                    }
+                }
+            }
+            const Unicode::String & playerName = temp;
+            const Unicode::String & listName = tokens[tokens.size()-2];
+            const Unicode::String & action = tokens[tokens.size()-1];
+            ScriptParams scriptParams;
+            scriptParams.addParam(actor);
+            scriptParams.addParam(playerName);
+            scriptParams.addParam(listName);
+            scriptParams.addParam(action);
+            actorObj->getScriptObject()->trigAllScripts(Scripting::TRIG_PERMISSION_LIST_MODIFY, scriptParams);
+        }
+	    else
+        {
+            size_t curpos = 0;
+            const Unicode::String & playerName = Unicode::narrowToWide(nextStringParm(params, curpos));
+            const Unicode::String & listName = Unicode::narrowToWide(nextStringParm(params, curpos));
+            const Unicode::String & action = Unicode::narrowToWide(nextStringParm(params, curpos));
+            ScriptParams scriptParams;
+            scriptParams.addParam(actor);
+            scriptParams.addParam(playerName);
+            scriptParams.addParam(listName);
+            scriptParams.addParam(action);
+            actorObj->getScriptObject()->trigAllScripts(Scripting::TRIG_PERMISSION_LIST_MODIFY, scriptParams);
+        }
 	}
 }
 
@@ -3385,9 +3422,27 @@ static void commandFuncOpenContainer(Command const & cmd, NetworkId const &actor
 		return;
 	}
 
-	//-- don't open factory crates
-	if (container->getGameObjectType() == SharedObjectTemplate::GOT_misc_factory_crate)
+	//-- don't open factory crates or crafting tools
+	const int got = container->getGameObjectType();
+	if (got == SharedObjectTemplate::GOT_misc_factory_crate || got == SharedObjectTemplate::GOT_tool_crafting)
+	{
 		return;
+	}
+	
+	//-- if we are requesting to open an inventory, datapad, or bank, make sure it belongs to us or we're a CSR
+	//-- this provides better security for /editDatapad /editInventory and /editBank admin commands.
+	const uint32 crc = container->getTemplateCrc();
+	if((player->isPlayerControlled()) && (crc == 2007924155 || crc == -1783727815 || crc == -172438875))
+	{
+		Client * const clientObj = player->getClient();
+		if(clientObj)
+		{
+			if(container->getOwnerId() != actor && !clientObj->isGod())
+			{
+				return;
+			}
+		}
+	}
 
 	//-- if they are opening a crafting station, what they really want is the hopper
 	//-- but only if the object is not a volume container
@@ -5707,8 +5762,7 @@ static void commandFuncCreatePrototype(const Command&, const NetworkId& actor, c
 		GameControllerMessageFlags::RELIABLE |
 		GameControllerMessageFlags::DEST_AUTH_CLIENT);
 
-	if (!result)
-		player->stopCrafting(false);
+	player->stopCrafting(result);
 }
 
 // ----------------------------------------------------------------------
@@ -5739,8 +5793,7 @@ static void commandFuncCreateManfSchematic(const Command&, const NetworkId& acto
 		GameControllerMessageFlags::RELIABLE |
 		GameControllerMessageFlags::DEST_AUTH_CLIENT);
 
-	if (!result)
-		player->stopCrafting(false);
+	player->stopCrafting(result);
 }
 
 // ----------------------------------------------------------------------
@@ -6739,7 +6792,13 @@ static void commandFuncServerDestroyObject(Command const &, NetworkId const & ac
 			Chat::sendSystemMessage(*player, pp);
 	}
 	else
+	{
+		// don't throw a warning if the only reason destruction failed is because the no destroy script blocked the request
+		if (targetObject->getScriptObject()->hasScript("item.special.nodestroy")) {
+			return;
+		}
 		WARNING(true, ("commandFuncServerDestroyObject: Error encountered while deleting object %s", target.getValueString().c_str()));
+	}
 }
 
 // ----------------------------------------------------------------------
@@ -7916,6 +7975,10 @@ static void commandFuncSquelch(Command const &, NetworkId const &actor, NetworkI
 		const Client * gmClient = gm->getClient();
 		if (gmClient)
 		{
+            if(!gmClient->isGod())
+            {
+                return;
+            }
 			char buffer[2048];
 			if (!target.isValid())
 			{
@@ -7985,6 +8048,10 @@ static void commandFuncUnsquelch(Command const &, NetworkId const &actor, Networ
 		const Client * gmClient = gm->getClient();
 		if (gmClient)
 		{
+            if(!gmClient->isGod())
+            {
+                return;
+            }
 			char buffer[2048];
 			if (!target.isValid())
 			{
@@ -8054,6 +8121,10 @@ static void commandFuncGrantWarden(Command const &, NetworkId const &actor, Netw
 		const Client * gmClient = gm->getClient();
 		if (gmClient)
 		{
+		    if(!gmClient->isGod())
+            {
+		        return;
+            }
 			char buffer[2048];
 			if (!target.isValid())
 			{
@@ -8125,6 +8196,10 @@ static void commandFuncRevokeWarden(Command const &, NetworkId const &actor, Net
 		const Client * gmClient = gm->getClient();
 		if (gmClient)
 		{
+            if(!gmClient->isGod())
+            {
+                return;
+            }
 			char buffer[2048];
 			if (!target.isValid())
 			{
@@ -8197,16 +8272,16 @@ static void commandFuncSpammer(Command const &, NetworkId const &actor, NetworkI
 		const Client * gmClient = gm->getClient();
 		if (gmClient)
 		{
-			// check warden permission first
+			// check warden permission first or if god
 			const PlayerObject * gmPlayerObject = PlayerCreatureController::getPlayerObject(gm);
-			if (!gmPlayerObject || !gmPlayerObject->isWarden())
+			if (!gmPlayerObject || (!gmPlayerObject->isWarden() && !gmClient->isGod()))
 			{
 				Chat::sendSystemMessage(*gm, StringId("warden", "not_authorized"), Unicode::emptyString);
 				return;
 			}
 
-			// check to see if warden functionality is enabled
-			if (!ConfigServerGame::getEnableWarden())
+			// check to see if warden functionality is enabled but don't restrict if god
+			if (!ConfigServerGame::getEnableWarden() && !gmClient->isGod())
 			{
 				Chat::sendSystemMessage(*gm, StringId("warden", "warden_functionality_disabled"), Unicode::emptyString);
 				return;
@@ -8291,6 +8366,16 @@ static void commandFuncSpammer(Command const &, NetworkId const &actor, NetworkI
 				}
 			}
 
+			// can't spammer someone in god mode or another warden
+			if(so->getClient()->isGod() || p->isWarden())
+            {
+                ProsePackage prosePackage;
+                prosePackage.stringId = StringId("warden", "cannot_spammer_target");
+                prosePackage.target.str = so->getAssignedObjectName();
+                Chat::sendSystemMessage(*gm, prosePackage);
+                return;
+            }
+
 			// cannot /spammer self
 			if (target == actor)
 			{
@@ -8338,9 +8423,9 @@ static void commandFuncUnspammer(Command const &, NetworkId const &actor, Networ
 		const Client * gmClient = gm->getClient();
 		if (gmClient)
 		{
-			// check warden permission first
+			// check warden permission first or if god
 			const PlayerObject * gmPlayerObject = PlayerCreatureController::getPlayerObject(gm);
-			if (!gmPlayerObject || !gmPlayerObject->isWarden())
+			if (!gmPlayerObject || (!gmPlayerObject->isWarden() && !gmClient->isGod()))
 			{
 				Chat::sendSystemMessage(*gm, StringId("warden", "not_authorized"), Unicode::emptyString);
 				return;
@@ -8418,8 +8503,8 @@ static void commandFuncUnspammer(Command const &, NetworkId const &actor, Networ
 				return;
 			}
 
-			// can only /unspammer target that I /spammer(ed)
-			if (p->getSquelchedById() != actor)
+			// can only /unspammer target that I /spammer(ed) unless I'm god
+			if (p->getSquelchedById() != actor && !gmClient->isGod())
 			{
 				ProsePackage prosePackage;
 				prosePackage.stringId = StringId("warden", "cannot_unspammer_target");
@@ -8445,8 +8530,16 @@ static void commandFuncUnspammer(Command const &, NetworkId const &actor, Networ
 
 //-----------------------------------------------------------------------
 
+/**
+ * @deprecated This ungodly idea to empower wardens to grant warden permissions to other players is horrible
+ * and I don't believe this functionality should remotely exist at all absent intentional implementation
+ * by a specific server. GMs can use /grantWarden if they want a Warden or the grant can be scripted.
+ *
+ * Aconite - SWG Source - 2021
+ */
 static void commandFuncDeputizeWarden(Command const &, NetworkId const &actor, NetworkId const & target, Unicode::String const &params)
 {
+    /*
 	const CreatureObject * gm = dynamic_cast<CreatureObject *>(NetworkIdManager::getObjectById(actor));
 	if (gm)
 	{
@@ -8518,12 +8611,18 @@ static void commandFuncDeputizeWarden(Command const &, NetworkId const &actor, N
 				"C++DeputizeWardenRspCannotDeputize");
 		}
 	}
+    */
 }
 
 //-----------------------------------------------------------------------
 
+/**
+ * @deprecated
+ * @see commandFuncDeputizeWarden
+ */
 static void commandFuncUndeputizeWarden(Command const &, NetworkId const &actor, NetworkId const & target, Unicode::String const &params)
 {
+    /*
 	const CreatureObject * gm = dynamic_cast<CreatureObject *>(NetworkIdManager::getObjectById(actor));
 	if (gm)
 	{
@@ -8581,6 +8680,7 @@ static void commandFuncUndeputizeWarden(Command const &, NetworkId const &actor,
 				"C++UndeputizeWardenRspCannotUndeputize");
 		}
 	}
+    */
 }
 
 //-----------------------------------------------------------------------

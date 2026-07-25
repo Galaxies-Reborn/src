@@ -55,6 +55,7 @@ namespace ScriptMethodsPlayerAccountNamespace
 	jboolean     JNICALL isIgnoring(JNIEnv *env, jobject self, jlong player, jstring who);
 	jboolean     JNICALL adjustLotCount(JNIEnv *env, jobject self, jlong player, jint adjustment);
 	jint         JNICALL getAccountNumLots(JNIEnv *env, jobject self, jlong player);
+	jint         JNICALL getMaxHousingLots(JNIEnv *env, jobject self);
 	jint         JNICALL getGameFeatureBits(JNIEnv *env, jobject self, jlong player);
 	jint         JNICALL getSubscriptionFeatureBits(JNIEnv *env, jobject self, jlong player);
 	jboolean     JNICALL isUsingAdminLogin(JNIEnv *env, jobject self, jlong player);
@@ -76,6 +77,7 @@ namespace ScriptMethodsPlayerAccountNamespace
 	void         JNICALL renameCharacterReleaseNameReservation(JNIEnv *env, jobject self, jlong player);
 	void         JNICALL renameCharacter(JNIEnv *env, jobject self, jlong player, jstring newName);
 	jint         JNICALL getPlayerStationId(JNIEnv *env, jobject self, jlong player);
+	jstring      JNICALL getPlayerUsername(JNIEnv *env, jobject self, jlong player);
 }
 
 //========================================================================
@@ -90,6 +92,7 @@ const JNINativeMethod NATIVES[] = {
 	JF("_isIgnoring", "(JLjava/lang/String;)Z", isIgnoring),
 	JF("_adjustLotCount", "(JI)Z", adjustLotCount),
 	JF("_getAccountNumLots", "(J)I", getAccountNumLots),
+	JF("_getMaxHousingLots", "()I", getMaxHousingLots),
 	JF("_getGameFeatureBits", "(J)I", getGameFeatureBits),
 	JF("_getSubscriptionFeatureBits", "(J)I", getSubscriptionFeatureBits),
 	JF("_isUsingAdminLogin", "(J)Z", isUsingAdminLogin),
@@ -111,6 +114,7 @@ const JNINativeMethod NATIVES[] = {
 	JF("_renameCharacterReleaseNameReservation", "(J)V", renameCharacterReleaseNameReservation),
 	JF("_renameCharacter", "(JLjava/lang/String;)V", renameCharacter),
 	JF("_getPlayerStationId", "(J)I", getPlayerStationId),
+	JF("_getPlayerUsernameDoNotUse", "(J)Ljava/lang/String;", getPlayerUsername),
 };
 
 	return JavaLibrary::registerNatives(NATIVES, sizeof(NATIVES)/sizeof(NATIVES[0]));
@@ -193,6 +197,15 @@ jint JNICALL ScriptMethodsPlayerAccountNamespace::getAccountNumLots(JNIEnv *env,
 	}
 
 	return playerObject->getAccountNumLots();
+}
+
+// ----------------------------------------------------------------------
+
+jint JNICALL ScriptMethodsPlayerAccountNamespace::getMaxHousingLots(JNIEnv *env, jobject self)
+{
+	UNREF(env);
+	UNREF(self);
+	return ConfigServerGame::getMaxHousingLots();
 }
 
 // ----------------------------------------------------------------------
@@ -972,6 +985,35 @@ jint JNICALL ScriptMethodsPlayerAccountNamespace::getPlayerStationId(JNIEnv *env
 	NOT_NULL(env);
 
 	return NameManager::getInstance().getPlayerStationId(NetworkId(static_cast<NetworkId::NetworkIdType>(player)));
+}
+
+// ----------------------------------------------------------------------
+
+/**
+ * Get the account username of a player.
+ * Note: The player must be online to use this.
+ * See base_class.java implementation for more info.
+ *
+ * @param player the object id of the player
+ * @return string of the player's account username
+ */
+jstring JNICALL ScriptMethodsPlayerAccountNamespace::getPlayerUsername(JNIEnv *env, jobject self, jlong player) {
+    UNREF(self);
+    NOT_NULL(env);
+
+    CreatureObject const * creatureObject = nullptr;
+    JavaLibrary::getObject(player, creatureObject);
+    DEBUG_WARNING(!creatureObject, ("JavaLibrary::getPlayerUsername: could not get creatureObject for player %d", player));
+    if (creatureObject)
+    {
+        const Client * playerClient = creatureObject->getClient();
+        DEBUG_WARNING(!playerClient, ("JavaLibrary::getPlayerUsername: could not get playerClient for player %d", player));
+        if(playerClient)
+        {
+            return JavaString(playerClient->getAccountName()).getReturnValue();
+        }
+    }
+    return nullptr;
 }
 
 // ======================================================================

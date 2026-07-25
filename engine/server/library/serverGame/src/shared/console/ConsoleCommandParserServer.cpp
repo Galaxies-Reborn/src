@@ -195,6 +195,7 @@ static const CommandParser::CmdInfo cmds[] =
 	{"getCommoditiesAuctionLocationPriorityQueue", 1, "<count>",          "Gets the top <count> items in the auction location priority queue"},
 	{"getCommoditiesItemTypeMap", 1, "<game object type>",                "For the specified game object type, gets the list of item type"},
 	{"setCompletedTutorial",      1, "<oid>",                             "Mark the account belonging to the specified character (character does not have to be logged in) as having completed the tutorial, so that the skip tutorial option will be available during character creation for that account"},
+	{"getUniverseProcess", 0, "", "Returns the Game Server Universe Process ID"},
 #ifdef _DEBUG
 	{"setExtraDelayPerFrameMs",   1, "<ms>",                              "Do an intentional sleep each frame, to emulate long loop time"},
 	{"serverinfo",   0, "",                              "Serverinformation"},
@@ -219,6 +220,17 @@ bool ConsoleCommandParserServer::performParsing(const NetworkId & userId, const 
 	UNREF(originalCommand);
 
 	ServerObject * user = safe_cast<ServerObject *>(NetworkIdManager::getObjectById(userId));
+
+    CreatureObject * const playerObject = dynamic_cast<CreatureObject *>(ServerWorld::findObjectByNetworkId(userId));
+    if (!playerObject)
+    {
+        WARNING_STRICT_FATAL(true, ("Console command executed on invalid player object %s", userId.getValueString().c_str()));
+        return false;
+    }
+
+    if (!playerObject->getClient()->isGod()) {
+        return false;
+    }
 
 	//-----------------------------------------------------------------
 
@@ -1001,6 +1013,17 @@ bool ConsoleCommandParserServer::performParsing2(const NetworkId & userId, const
 	UNREF(originalCommand);
 
 	ServerObject * user = safe_cast<ServerObject *>(NetworkIdManager::getObjectById(userId));
+
+    CreatureObject * const playerObject = dynamic_cast<CreatureObject *>(ServerWorld::findObjectByNetworkId(userId));
+    if (!playerObject)
+    {
+        WARNING_STRICT_FATAL(true, ("Console command executed on invalid player object %s", userId.getValueString().c_str()));
+        return false;
+    }
+
+    if (!playerObject->getClient()->isGod()) {
+        return false;
+    }
 
 	if (isAbbrev(argv[0], "destroyPersistedBuildoutAreaDuplicates"))
 	{
@@ -3427,6 +3450,11 @@ bool ConsoleCommandParserServer::performParsing2(const NetworkId & userId, const
 			result += Unicode::narrowToWide(FormattedString<512>().sprintf("There is no character on this galaxy with id (%s)\n", oid.getValueString().c_str()));
 		}
 	}
+	else if (isAbbrev(argv[0], "getUniverseProcess"))
+    {
+	    result += Unicode::narrowToWide(FormattedString<512>().sprintf("Universe Process ID is: %d\n", ServerUniverse::getInstance().getUniverseProcess()));
+        result += getErrorMessage(argv[0], ERR_SUCCESS);
+    }
 #ifdef _DEBUG
 	else if (isAbbrev(argv[0], "setExtraDelayPerFrameMs"))
 	{

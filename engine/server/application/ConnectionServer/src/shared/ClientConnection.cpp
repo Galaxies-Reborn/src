@@ -198,8 +198,7 @@ std::string ClientConnection::getCurrentActivePlayTimeDuration() const {
 void ClientConnection::sendPlayTimeInfoToGameServer() const {
     if (m_client && m_client->getGameConnection()) {
         // update the game server with play time info
-        GenericValueTypeMessage < std::pair < int32, std::pair < int32, unsigned
-        long > > >
+        GenericValueTypeMessage < std::pair < int32, std::pair < int32, uint32_t > > >
         const msgPlayTimeInfo(
         "UpdateSessionPlayTimeInfo", std::make_pair(static_cast<int32>(m_startPlayTime), std::make_pair(static_cast<int32>(m_lastActiveTime), m_activePlayTimeDuration)));
 
@@ -394,19 +393,41 @@ ClientConnection::onIdValidated(bool canLogin, bool canCreateRegularCharacter, b
     // Save lists of claimed rewards, which won't be used again until later in the login sequence
     m_consumedRewardEvents = consumedRewardEvents;
     m_claimedRewardItems = claimedRewardItems;
+    bool isAdmin = false;
 
-
-    int level = 0;
-    if (AdminAccountManager::isAdminAccount(Unicode::toLower(getAccountName()), level) && (level !=
-                                                                                           0)) // Note:  not checking IP, so that owners of god accounts can create characters to play from home without having to erase the characters they use for work
+    // Revised - SWG Source - 2021 (Aconite)
+    // Determine if this account is in the Admin Table
+    if(AdminAccountManager::getAdminLevel(Unicode::toLower(getAccountName())) > 0)
     {
+        // Determine if we are using Secure Login (IP restricted)
+        if(ConfigConnectionServer::getUseSecureLoginForGodAccess())
+        {
+            // If we *require* secure login, and we are *not* from a secure IP, disconnect the client
+            // as they should not be inside this account
+            if(!AdminAccountManager::isInternalIp(getRemoteAddress()))
+            {
+                LOG("GodMode", ("[%s : %s : %s : %s] login to this admin account failed because secure login was required but the remote IP address connected was not in the allowed range.",
+                        getAccountName().c_str(), getCharacterName().c_str(), getCharacterId().getValueString().c_str(), getRemoteAddress().c_str()));
+                disconnect();
+                return;
+            }
+            else
+            {
+                m_isSecure = true;
+            }
+        }
+        // If we're here, we're an admin account, and we have the correct IP (if applicable)
+        // so we're overriding the ClientPermissionMessage values
         canLogin = true;
         canCreateRegularCharacter = true;
         canSkipTutorial = true;
         m_isAdminAccount = true;
+        isAdmin = true; // this flag goes to the client to let it know we can connect to a Locked Cluster
+        LOG("GodMode", ("[%s : %s : %s : %s] validating this account to the Connection Server after successful authentication.",
+                getAccountName().c_str(), getCharacterName().c_str(), getCharacterId().getValueString().c_str(), getRemoteAddress().c_str()));
     }
 
-    ClientPermissionsMessage c(canLogin, canCreateRegularCharacter, canCreateJediCharacter, canSkipTutorial);
+    ClientPermissionsMessage c(canLogin, canCreateRegularCharacter, canCreateJediCharacter, canSkipTutorial, isAdmin);
     send(c, true);
 
     DEBUG_REPORT_LOG(true, ("Permissions for %lu:\n", getSUID()));
@@ -1347,9 +1368,7 @@ ClientConnection::onValidateClient(StationId suid, const std::string &username, 
     }
 
     // tell client the server-side game and subscription feature bits and which ConnectionServer we are and the current server Epoch time
-    GenericValueTypeMessage < std::pair < std::pair < unsigned
-    long, unsigned
-    long > , std::pair < int, int32 > > >
+    GenericValueTypeMessage < std::pair < std::pair < uint32_t, uint32_t > , std::pair < int, int32 > > >
     const msgFeatureBits(
     "AccountFeatureBits", std::make_pair(std::make_pair(gameFeatures, subscriptionFeatures), std::make_pair(ConfigConnectionServer::getConnectionServerNumber(), static_cast<int32>(::time(nullptr)))));
     send(msgFeatureBits, true);

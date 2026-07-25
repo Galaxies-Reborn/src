@@ -101,10 +101,7 @@ namespace ConsoleCommandParserObjectNamespace
 	//test handler, this should eventually be removed
 	void testConsentHandler(const NetworkId& player, int id, bool response)
 	{
-		int i = 0;
-		if (response == true)
-			i = 1;
-		DEBUG_REPORT_LOG(true, ("We received a test consent back with values NetworkId:%s Id:%d Response:%d\n", player.getValueString().c_str(), id, i));
+		DEBUG_REPORT_LOG(true, ("We received a test consent back with values NetworkId: %s Id: %d Response: %d\n", player.getValueString().c_str(), id, (response ? 1 : 0)));
 	}
 
 	ServerObjectTemplate const *getObjectTemplateForCreation(std::string const &templateName)
@@ -475,6 +472,7 @@ static const CommandParser::CmdInfo cmds[] =
 	{"reloadSwgTcgAccountFeatureId",    1, "<oid>", "Retrieve the SWG TCG account feature Ids for the specified character"},
 	{"unloadBuildingContents",          1, "<oid>", "Unload the contents of a player-placed authoritative demand-loaded building"},
 	{"isOnSolidFloor",                  1, "<oid>", "Checks to see if the specified object is \"on solid floor\""},
+	{"proxyToAllGameServers", 			1, "<oid>", "Creates a Proxy of the given object on all Game Servers."},
 
 	{"", 0, "", ""} // this must be last
 };
@@ -501,6 +499,10 @@ bool ConsoleCommandParserObject::performParsing (const NetworkId & userId, const
 		WARNING_STRICT_FATAL(true, ("Console command executed on invalid player object %s", userId.getValueString().c_str()));
 		return false;
 	}
+
+    if (!playerObject->getClient()->isGod()) {
+        return false;
+    }
 		
 	UNREF(originalCommand);
 
@@ -2229,6 +2231,10 @@ bool ConsoleCommandParserObject::performParsing2(const NetworkId & userId, const
 		WARNING_STRICT_FATAL(true, ("Console command executed on invalid player object %s", userId.getValueString().c_str()));
 		return false;
 	}
+
+    if (!playerObject->getClient()->isGod()) {
+        return false;
+    }
 
 	UNREF(originalCommand);
 
@@ -4193,6 +4199,21 @@ bool ConsoleCommandParserObject::performParsing2(const NetworkId & userId, const
 			result += Unicode::narrowToWide(FormattedString<1024>().sprintf("object (%s) not found.\n", oid.getValueString().c_str()));
 		}
 	}
+
+	// ----------------------------------------------------------------------
+
+    else if (isAbbrev(argv[0], "proxyToAllGameServers"))
+    {
+        NetworkId const oid(Unicode::wideToNarrow(argv[1]));
+        auto * const object = dynamic_cast<ServerObject *>(NetworkIdManager::getObjectById(oid));
+        GameServer &gs = GameServer::getInstance();
+        if(object) {
+            gs.createProxyOnAllServers(object);
+            result += getErrorMessage(argv[0], ERR_SUCCESS);
+        } else {
+            result += getErrorMessage(argv[0], ERR_FAIL);
+        }
+    }
 
 	// ----------------------------------------------------------------------
 
