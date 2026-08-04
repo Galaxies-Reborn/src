@@ -1,4 +1,5 @@
 //======================================================================
+
 //
 // ExpertiseManager.cpp
 // copyright (c) 2006 Sony Online Entertainment
@@ -38,12 +39,6 @@ namespace ExpertiseManagerNamespace
 	ExpertiseGrid s_expertiseGrid;
 	std::string const cs_expertiseDatatableName("datatables/expertise/expertise.iff");
 	void loadExpertiseTable(DataTable const & datatable);
-
-	// character level --> expertise points awarded
-	typedef std::map<int, int> LevelToPointsMap;
-	LevelToPointsMap s_expertisePointsForLevel;
-	std::string const cs_expertisePointsDatatableName("datatables/player/player_level.iff");
-	void loadExpertisePointsTable(DataTable const & datatable);
 
 	// expertise tree id --> string id
 	typedef std::map<int, std::string> TreeToStringIdMap;
@@ -110,31 +105,6 @@ void ExpertiseManagerNamespace::loadExpertiseTable(DataTable const & datatable)
 
 		UNREF(result);
 		//DEBUG_WARNING(!result.second, ("ExpertiseManager: %s row %d: duplicate expertise: %s", cs_expertiseDatatableName.c_str(), row, name.c_str()));
-	}
-}
-
-//----------------------------------------------------------------------
-
-void ExpertiseManagerNamespace::loadExpertisePointsTable(DataTable const & datatable)
-{
-	UNREF(datatable); // required for callback, but unused
-
-	s_expertisePointsForLevel.clear();
-
-	DataTable const * s_expertisePointsDatatable = DataTableManager::getTable(cs_expertisePointsDatatableName, true);
-
-	DEBUG_FATAL(!s_expertisePointsDatatable, ("ExpertiseManager: failed to load %s", cs_expertisePointsDatatableName.c_str()));
-
-	int const numRows = s_expertisePointsDatatable->getNumRows();
-
-	int const levelColumn  = s_expertisePointsDatatable->findColumnNumber("level");
-	int const pointsColumn = s_expertisePointsDatatable->findColumnNumber("expertise_points");
-
-	for (int row = 0; row < numRows; ++row)
-	{
-		int level  = s_expertisePointsDatatable->getIntValue(levelColumn, row);
-		int points = s_expertisePointsDatatable->getIntValue(pointsColumn, row);
-		s_expertisePointsForLevel[level] = points;
 	}
 }
 
@@ -234,9 +204,6 @@ void ExpertiseManager::install()
 	loadSkillTemplateTable(cs_unusedDataTable);
 	DataTableManager::addReloadCallback(cs_skillTemplateDatatableName, &loadSkillTemplateTable);
 
-	loadExpertisePointsTable(cs_unusedDataTable);
-	DataTableManager::addReloadCallback(cs_expertisePointsDatatableName, &loadExpertisePointsTable);
-
 	loadExpertiseTreesTable(cs_unusedDataTable);
 	DataTableManager::addReloadCallback(cs_expertiseTreesDatatableName, &loadExpertiseTreesTable);
 
@@ -325,19 +292,10 @@ SkillObject const * ExpertiseManager::getExpertiseSkillAt(int tree, int tier, in
  */
 int ExpertiseManager::getExpertisePointsForLevel(int level)
 {
-	int totalPoints = 0;
-
-	for (LevelToPointsMap::const_iterator i = s_expertisePointsForLevel.begin(); i != s_expertisePointsForLevel.end(); ++i)
-	{
-		int const levelForRow  = (*i).first;
-		int const pointsForRow = (*i).second;
-		if (levelForRow <= level)
-		{
-			totalPoints += pointsForRow;
-		}
-	}
-
-	return totalPoints;
+	UNREF(level);
+	// Publish 14.1 has no combat-level expertise point pool. Keep this
+	// compatibility symbol inert for retained cleanup and linkage callers.
+	return 0;
 }
 
 //----------------------------------------------------------------------
@@ -636,4 +594,3 @@ bool ExpertiseManager::ExpertiseCoord::operator<(ExpertiseManager::ExpertiseCoor
 }
 
 //======================================================================
-

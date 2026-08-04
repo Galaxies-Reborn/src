@@ -40,7 +40,6 @@
 #include "serverGame/SurveySystem.h"
 #include "serverScript/GameScriptObject.h"
 #include "sharedSkillSystem/ExpertiseManager.h"
-#include "sharedSkillSystem/LevelManager.h"
 #include "serverUtility/AdminAccountManager.h"
 
 // ======================================================================
@@ -84,7 +83,6 @@ void SetupServerGame::install()
 	AiServerShipObjectInterface::install();
 	ServerBuildoutManager::install();
 	ExpertiseManager::install();
-	LevelManager::install();
 }
 
 // ----------------------------------------------------------------------
