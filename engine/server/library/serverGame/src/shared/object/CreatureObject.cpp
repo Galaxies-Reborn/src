@@ -366,30 +366,6 @@ namespace CreatureObjectNamespace
 		DataTableManager::close(fileName);
 	}
 
-	struct CommandSeriesRecord
-	{
-		std::string commandName;
-		std::string baseCommandName;
-		int level;
-	};
-	std::vector<CommandSeriesRecord> s_commandSeriesRecords;
-
-	void loadCommandSeriesTable()
-	{
-		DataTable *t = DataTableManager::getTable("datatables/command/command_series.iff", true);
-		for (int row = 0; row < t->getNumRows(); ++row)
-		{
-			CommandSeriesRecord csr;
-			csr.commandName = t->getStringValue("commandName", row);
-			csr.baseCommandName = t->getStringValue("baseCommandName", row);
-			csr.level = t->getIntValue("level", row);
-			IGNORE_RETURN(s_commandSeriesRecords.push_back(csr));			
-		}
-		DataTableManager::close("datatables/command/command_series.iff");
-	}
-
-	// ----------------------------------------------------------------------
-
 	int lookupDanceVisual(int performanceType)
 	{
 		std::map<int, int>::const_iterator i = s_danceVisualMap.find(performanceType);
@@ -1032,7 +1008,6 @@ void CreatureObject::install()
 {
 	loadDanceVisualTable();
 	loadInstrumentTable();
-	loadCommandSeriesTable();
 
 	installForMounts();
 
@@ -14728,29 +14703,9 @@ bool CreatureObject::clearAllExpertises()
 
 void CreatureObject::recomputeCommandSeries()
 {
-	for(std::vector<CommandSeriesRecord>::iterator i = s_commandSeriesRecords.begin(); i != s_commandSeriesRecords.end(); ++i)
-	{
-		CommandSeriesRecord const & csr = *i;
-		bool hasLevel = getLevel() >= csr.level;
-		if(csr.baseCommandName.empty())
-		{
-			if(!hasLevel)
-				LOG("CustomerService",("Player %s of level %d has command %s from command series, but should not have it until level %d",
-					getNetworkId().getValueString().c_str(), getLevel(), csr.baseCommandName.c_str(), csr.level));
-		}
-		else
-		{
-			if(hasCommand(csr.commandName) && (!hasCommand(csr.baseCommandName) || !hasLevel))
-			{
-				revokeCommand(csr.commandName, true);
-			}
-			else if(!hasCommand(csr.commandName) && hasCommand(csr.baseCommandName) && hasLevel)
-			{
-				grantCommand(csr.commandName, true);
-			}
-		}
-
-	}
+	// Link-compatible no-op.  Publish 14.1 commands are granted and revoked
+	// by owned skill boxes (or explicit quest/item grants), never by an NGE
+	// combat-level command ladder.
 }
 
 //-----------------------------------------------------------------------
