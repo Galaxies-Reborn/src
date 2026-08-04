@@ -1077,8 +1077,9 @@ inline Attributes::Value CreatureObject::getUnmodifiedMaxAttribute(Attributes::E
 {
 	DEBUG_FATAL(attribute < 0 || attribute >= Attributes::NumberOfAttributes, ("attribute out of range\n"));
 
-	// @NOTE: special case for health attribute adds level health
-	return (Attributes::Health == attribute) ? m_maxAttributes[attribute] + m_levelHealthGranted.get() : m_maxAttributes[attribute];
+	// NGE level-derived Health never applies to Publish 14.1 players.  NPC
+	// authored level Health remains unchanged.
+	return (Attributes::Health == attribute && !isPlayerControlled()) ? m_maxAttributes[attribute] + m_levelHealthGranted.get() : m_maxAttributes[attribute];
 }
 
 //----------------------------------------------------------------------

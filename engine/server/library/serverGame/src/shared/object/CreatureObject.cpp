@@ -169,7 +169,6 @@
 #include "sharedObject/SlottedContainmentProperty.h"
 #include "sharedObject/VolumeContainer.h"
 #include "sharedSkillSystem/ExpertiseManager.h"
-#include "sharedSkillSystem/LevelManager.h"
 #include "sharedSkillSystem/SkillManager.h"
 #include "sharedSkillSystem/SkillObject.h"
 #include "sharedTerrain/TerrainObject.h"
@@ -253,6 +252,40 @@ namespace CreatureObjectNamespace
 			skillName == "expertise" ||
 			skillName.find("expertise_") == 0 ||
 			skillName.find("internal_expertise_") == 0;
+	}
+
+	int getPreCuPlayerCombatDifficulty(CreatureObject const & player)
+	{
+		WeaponObject const * const weapon = player.getReadiedWeapon();
+		char const * difficultyMod = "private_unarmed_combat_difficulty";
+		bool jediWeapon = false;
+
+		if (weapon != nullptr)
+		{
+			switch (weapon->getWeaponType())
+			{
+				case ServerWeaponObjectTemplate::WT_rifle:             difficultyMod = "private_rifle_combat_difficulty"; break;
+				case ServerWeaponObjectTemplate::WT_lightRifle:        difficultyMod = "private_carbine_combat_difficulty"; break;
+				case ServerWeaponObjectTemplate::WT_pistol:            difficultyMod = "private_pistol_combat_difficulty"; break;
+				case ServerWeaponObjectTemplate::WT_heavyWeapon:       difficultyMod = "private_heavyweapon_combat_difficulty"; break;
+				case ServerWeaponObjectTemplate::WT_1handMelee:        difficultyMod = "private_onehandmelee_combat_difficulty"; break;
+				case ServerWeaponObjectTemplate::WT_2handMelee:        difficultyMod = "private_twohandmelee_combat_difficulty"; break;
+				case ServerWeaponObjectTemplate::WT_unarmed:           difficultyMod = "private_unarmed_combat_difficulty"; break;
+				case ServerWeaponObjectTemplate::WT_polearm:           difficultyMod = "private_polearm_combat_difficulty"; break;
+				case ServerWeaponObjectTemplate::WT_1handLightsaber:   difficultyMod = "private_onehandlightsaber_combat_difficulty"; jediWeapon = true; break;
+				case ServerWeaponObjectTemplate::WT_2handLightsaber:   difficultyMod = "private_twohandlightsaber_combat_difficulty"; jediWeapon = true; break;
+				case ServerWeaponObjectTemplate::WT_polearmLightsaber: difficultyMod = "private_polearmlightsaber_combat_difficulty"; jediWeapon = true; break;
+				default:                                               difficultyMod = "private_unarmed_combat_difficulty"; break;
+			}
+		}
+
+		int difficulty = player.getModValue(difficultyMod);
+		if (jediWeapon)
+			difficulty += player.getModValue("private_jedi_difficulty");
+
+		// Publish 14.1 uses this only as a hidden combat/con difficulty.  It
+		// is not an NGE player level and never grants level-derived Health.
+		return std::max(1, std::min(25, difficulty / 100 + 1));
 	}
 
 	// ----------------------------------------------------------------------
@@ -3654,10 +3687,9 @@ const int CreatureObject::grantExperiencePoints(const std::string & experienceTy
 		{
 			int const amountGranted = playerObject->grantExperiencePoints(experienceType, amount);
 
-			LevelManager::LevelData levelData(m_level.get(), m_totalLevelXp.get());
-			LevelManager::addXpToLevelData(levelData, experienceType, amountGranted);
-
-			setLevelData(levelData.currentLevel, levelData.currentLevelXp, levelData.currentHealth);
+			// PRE-CU XP belongs to named skill pools.  Refresh only the hidden
+			// weapon-skill difficulty; never feed XP into the NGE level table.
+			setLevelData(0, 0, 0);
 
 			return amountGranted;
 		}
@@ -3724,10 +3756,9 @@ const bool CreatureObject::grantSkill(const SkillObject & newSkill)
 		IGNORE_RETURN(getScriptObject()->trigAllScripts(Scripting::TRIG_SKILL_GRANTED,
 			params));
 
-		LevelManager::LevelData levelData(m_level.get(), m_totalLevelXp.get());
-		LevelManager::addSkillToLevelData(levelData, newSkill.getSkillName());
-
-		setLevelData(levelData.currentLevel, levelData.currentLevelXp, levelData.currentHealth);
+		// Skill boxes update their authored mods directly.  Refresh the hidden
+		// PRE-CU combat difficulty without creating level XP or bonus Health.
+		setLevelData(0, 0, 0);
 	}
 	else
 	{
@@ -3826,11 +3857,8 @@ void CreatureObject::revokeSkill(const SkillObject & oldSkill, bool silent)
 				params.addParam(oldSkill.getSkillName().c_str());
 				IGNORE_RETURN(getScriptObject()->trigAllScripts(Scripting::TRIG_SKILL_REVOKED,params));
 
-				// update the level data
-				LevelManager::LevelData levelData(m_level.get(), m_totalLevelXp.get());
-				LevelManager::removeSkillFromLevelData(levelData, oldSkill.getSkillName());
-
-				setLevelData(levelData.currentLevel, levelData.currentLevelXp, levelData.currentHealth);
+				// Refresh only the hidden PRE-CU weapon-skill difficulty.
+				setLevelData(0, 0, 0);
 			}
 		}
 	}
@@ -5472,6 +5500,12 @@ void CreatureObject::setCurrentWeapon(WeaponObject & weapon)
 	if(isAuthoritative())
 	{
 		m_currentWeapon = CachedNetworkId(weapon);
+		if (PlayerCreatureController::getPlayerObject(this) != nullptr)
+		{
+			// Core3/PRE-CU con difficulty follows the readied weapon family.
+			// It remains independent from NGE level XP and bonus Health.
+			setLevelData(0, 0, 0);
+		}
 	}
 	else
 	{
@@ -14106,10 +14140,8 @@ void CreatureObject::setLevel(int level)
 		}
 		else
 		{
-			LevelManager::LevelData levelData;
-			LevelManager::setLevelDataFromLevel(levelData, level);
-
-			setLevelData(levelData.currentLevel, levelData.currentLevelXp, levelData.currentHealth);
+			// Scripted/NGE level forcing cannot override PRE-CU player authority.
+			setLevelData(0, 0, 0);
 		}
 	}
 }
@@ -14136,10 +14168,7 @@ void CreatureObject::recalculateLevel()
 		}
 		else
 		{
-			LevelManager::LevelData levelData;
-			LevelManager::calculateLevelData(getLevelXp(), levelData);
-
-			setLevelData(levelData.currentLevel, levelData.currentLevelXp, levelData.currentHealth);
+			setLevelData(0, 0, 0);
 		}
 	}
 }
@@ -14151,22 +14180,25 @@ void CreatureObject::setLevelData(int16 level, int levelXp, int health)
 	PlayerObject * const playerObject = PlayerCreatureController::getPlayerObject(this);
 	if (playerObject != nullptr)
 	{
-		m_totalLevelXp = levelXp;
+		UNREF(level);
+		UNREF(levelXp);
+		UNREF(health);
 
-		m_levelHealthGranted = health;
-
-		m_level = level;
+		int16 const preCuDifficulty = static_cast<int16>(getPreCuPlayerCombatDifficulty(*this));
+		m_totalLevelXp = 0;
+		m_levelHealthGranted = 0;
+		m_level = preCuDifficulty;
 
 		GroupObject *group = getGroup();
 		if (group != 0)
 		{
-			group->setMemberLevel(getNetworkId(), level);
+			group->setMemberLevel(getNetworkId(), preCuDifficulty);
 		}
 
 		std::map<NetworkId, LfgCharacterData> const & connectedCharacterLfgData = ServerUniverse::getConnectedCharacterLfgData();
 		std::map<NetworkId, LfgCharacterData>::const_iterator iterFind = connectedCharacterLfgData.find(getNetworkId());
-		if ((iterFind != connectedCharacterLfgData.end()) && (iterFind->second.level != static_cast<int16>(level)))
-			ServerUniverse::setConnectedCharacterLevelData(getNetworkId(), static_cast<int16>(level));
+		if ((iterFind != connectedCharacterLfgData.end()) && (iterFind->second.level != preCuDifficulty))
+			ServerUniverse::setConnectedCharacterLevelData(getNetworkId(), preCuDifficulty);
 
 		// update and sync
 		computeTotalAttributes();
@@ -14253,31 +14285,13 @@ void CreatureObject::fixupLevelXpAfterLoading()
 	// are done loading, we will calculate the current level XP and level
 	if (playerObject && playerObject->isInitialized())
 	{
-		LevelManager::LevelData levelData;
-
-		// Level XP due to experience points
-		std::map<std::string, int> const & experienceMap = playerObject->getExperiencePoints();
-		std::map<std::string, int>::const_iterator i;
-		for (i = experienceMap.begin(); i != experienceMap.end(); ++i)
-		{
-			LevelManager::addXpToLevelData(levelData, i->first, i->second);
-		}
-
-		// Level XP due to skills
-		for (SkillList::const_iterator skillIter = m_skills.begin(); skillIter != m_skills.end(); ++skillIter)
-		{
-			SkillObject const * skill = *skillIter;
-			if (skill)
-			{
-				LevelManager::addSkillToLevelData(levelData, skill->getSkillName());
-			}
-		}
-
-		// Update the skill info directly (we do not want scripts triggered)
-		m_level              = levelData.currentLevel;
-		m_previousLevel      = levelData.currentLevel;
-		m_totalLevelXp       = levelData.currentLevelXp;
-		m_levelHealthGranted = levelData.currentHealth;
+		// Update directly so load does not fire level-change scripts.  Ordinary
+		// XP is never converted into NGE level XP or level-derived Health.
+		int16 const preCuDifficulty = static_cast<int16>(getPreCuPlayerCombatDifficulty(*this));
+		m_level              = preCuDifficulty;
+		m_previousLevel      = preCuDifficulty;
+		m_totalLevelXp       = 0;
+		m_levelHealthGranted = 0;
 
 		levelChanged();
 	}
