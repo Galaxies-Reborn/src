@@ -26,6 +26,31 @@
 
 //======================================================================
 
+namespace PlayerCreationManagerServerNamespace
+{
+	char const * getStartingSkill(std::string const & profession)
+	{
+		if (profession == "crafting_artisan")
+			return "crafting_artisan_novice";
+		if (profession == "combat_brawler")
+			return "combat_brawler_novice";
+		if (profession == "social_entertainer")
+			return "social_entertainer_novice";
+		if (profession == "combat_marksman")
+			return "combat_marksman_novice";
+		if (profession == "science_medic")
+			return "science_medic_novice";
+		if (profession == "outdoors_scout")
+			return "outdoors_scout_novice";
+
+		return 0;
+	}
+}
+
+using namespace PlayerCreationManagerServerNamespace;
+
+//======================================================================
+
 void PlayerCreationManagerServer::install ()
 {
 	if (!PlayerCreationManager::isInstalled ())
@@ -42,12 +67,27 @@ void PlayerCreationManagerServer::remove ()
 
 //----------------------------------------------------------------------
 
-bool PlayerCreationManagerServer::setupPlayer(CreatureObject & obj, const std::string & profession, StationId account, bool isJedi)
+bool PlayerCreationManagerServer::isValidStartingProfession(std::string const & profession)
+{
+	return getStartingSkill(profession) != 0;
+}
+
+//----------------------------------------------------------------------
+
+bool PlayerCreationManagerServer::setupPlayer(CreatureObject & obj, const std::string & profession, StationId account, bool isJedi, bool useNewbieTutorial)
 {
 	// NOTE: the isJedi flag doesn't actually create a Jedi character, but we need it
 	// so that the database/login server will keep track of a player's extra character
 	// slots correctly
 	UNREF(isJedi);
+	UNREF(account);
+
+	char const * const expectedStartingSkill = getStartingSkill(profession);
+	if (!expectedStartingSkill)
+	{
+		WARNING(true, ("PlayerCreationManagerServer rejected invalid Pre-CU starting profession [%s]", profession.c_str()));
+		return false;
+	}
 
 	AttribVector attribs;
 	const SkillVector * skills = 0;
@@ -69,22 +109,31 @@ bool PlayerCreationManagerServer::setupPlayer(CreatureObject & obj, const std::s
 	//----------------------------------------------------------------------
 	//-- setup skills
 	
-	if (skills)
+	if (!skills || skills->size() != 1 || skills->front() != expectedStartingSkill)
 	{
-		for (SkillVector::const_iterator it = skills->begin (); it != skills->end (); ++it)
-		{
-			const std::string & skillName = *it;
+		WARNING(true, ("PlayerCreationManagerServer profession [%s] did not resolve to its single expected starting skill [%s]", profession.c_str(), expectedStartingSkill));
+		return false;
+	}
 
-			const SkillObject * skill = SkillManager::getInstance ().getSkill (*it);
-			if (skill)
-			{
-				//-- newb tutorial will grant the skill
-				obj.setObjVarItem ("newbie.hasSkill", skillName);
-				break;
-			}
-			else
-				WARNING (true, ("PlayerCreationManagerServer Bad skill [%s] for profesion [%s]", skillName.c_str (), profession.c_str ()));
+	SkillObject const * const startingSkill = SkillManager::getInstance().getSkill(expectedStartingSkill);
+	if (!startingSkill)
+	{
+		WARNING(true, ("PlayerCreationManagerServer could not resolve Pre-CU starting skill [%s]", expectedStartingSkill));
+		return false;
+	}
+
+	// The retained Publish 14.1 tutorial teaches the selected novice box in its
+	// trainer room.  Skipped-tutorial characters need the grant immediately.
+	obj.setObjVarItem("newbie.hasSkill", expectedStartingSkill);
+	if (!useNewbieTutorial)
+	{
+		if (!obj.grantSkill(*startingSkill) || !obj.hasSkill(*startingSkill))
+		{
+			WARNING(true, ("PlayerCreationManagerServer failed to grant Pre-CU starting skill [%s]", expectedStartingSkill));
+			return false;
 		}
+
+		obj.removeObjVarItem("newbie.hasSkill");
 	}
 	
 	//----------------------------------------------------------------------

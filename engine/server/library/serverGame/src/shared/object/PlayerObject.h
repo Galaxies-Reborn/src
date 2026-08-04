@@ -240,6 +240,7 @@ public:
 	void                                setAllowEmptySlot(bool allow);
 
 	int                                 getAccountNumLots() const;
+	int                                 getAccountMaxLotsAdjustment() const;
 	void                                setAccountNumLotsOverLimitSpam();
 
 	CreatureObject *                    getCreatureObject();
@@ -484,6 +485,7 @@ protected:
 
 private:
 	int   getForcePowerRegen(float time);
+	void  retirePostNgeGcwRatingState();
 	void  onWaypointChanged(const Waypoint & newValue);
 	void  onWaypointCreated(const NetworkId &, const Waypoint &);
 	void  onWaypointSet(NetworkId const &, Waypoint const &, Waypoint const &);
@@ -813,6 +815,13 @@ inline void PlayerObject::setAllowEmptySlot(bool allow)
 inline int PlayerObject::getAccountNumLots() const
 {
 	return m_accountNumLots.get();
+}
+
+// ----------------------------------------------------------------------
+
+inline int PlayerObject::getAccountMaxLotsAdjustment() const
+{
+	return m_accountMaxLotsAdjustment.get();
 }
 
 // ----------------------------------------------------------------------

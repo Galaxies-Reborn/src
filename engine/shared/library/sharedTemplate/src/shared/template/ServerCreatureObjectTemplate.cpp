@@ -109,7 +109,7 @@ CompilerIntegerParam * ServerCreatureObjectTemplate::getCompilerIntegerParam(con
 {
 	if (strcmp(name, "attributes") == 0)
 	{
-		if (index >= 0 && index < 6)
+		if (index >= 0 && index < 9)
 		{
 			if (deepCheck && !isParamLoaded(name, false, index))
 			{
@@ -123,7 +123,7 @@ CompilerIntegerParam * ServerCreatureObjectTemplate::getCompilerIntegerParam(con
 	}
 	else if (strcmp(name, "minAttributes") == 0)
 	{
-		if (index >= 0 && index < 6)
+		if (index >= 0 && index < 9)
 		{
 			if (deepCheck && !isParamLoaded(name, false, index))
 			{
@@ -137,7 +137,7 @@ CompilerIntegerParam * ServerCreatureObjectTemplate::getCompilerIntegerParam(con
 	}
 	else if (strcmp(name, "maxAttributes") == 0)
 	{
-		if (index >= 0 && index < 6)
+		if (index >= 0 && index < 9)
 		{
 			if (deepCheck && !isParamLoaded(name, false, index))
 			{
@@ -495,9 +495,9 @@ char paramName[MAX_NAME_SIZE];
 		else if (strcmp(paramName, "attributes") == 0)
 		{
 			int listCount = file.read_int32();
-			DEBUG_WARNING(listCount != 6, ("Template %s: read array size of %d for array \"attributes\" of size 6, reading values anyway", file.getFileName(), listCount));
+			DEBUG_WARNING(listCount != 9, ("Template %s: read array size of %d for array \"attributes\" of size 9, reading values anyway", file.getFileName(), listCount));
 			int j;
-			for (j = 0; j < 6 && j < listCount; ++j)
+			for (j = 0; j < 9 && j < listCount; ++j)
 				m_attributes[j].loadFromIff(file);
 			// if there are more params for attributes read and dump them
 			for (; j < listCount; ++j)
@@ -509,9 +509,9 @@ char paramName[MAX_NAME_SIZE];
 		else if (strcmp(paramName, "minAttributes") == 0)
 		{
 			int listCount = file.read_int32();
-			DEBUG_WARNING(listCount != 6, ("Template %s: read array size of %d for array \"minAttributes\" of size 6, reading values anyway", file.getFileName(), listCount));
+			DEBUG_WARNING(listCount != 9, ("Template %s: read array size of %d for array \"minAttributes\" of size 9, reading values anyway", file.getFileName(), listCount));
 			int j;
-			for (j = 0; j < 6 && j < listCount; ++j)
+			for (j = 0; j < 9 && j < listCount; ++j)
 				m_minAttributes[j].loadFromIff(file);
 			// if there are more params for minAttributes read and dump them
 			for (; j < listCount; ++j)
@@ -523,9 +523,9 @@ char paramName[MAX_NAME_SIZE];
 		else if (strcmp(paramName, "maxAttributes") == 0)
 		{
 			int listCount = file.read_int32();
-			DEBUG_WARNING(listCount != 6, ("Template %s: read array size of %d for array \"maxAttributes\" of size 6, reading values anyway", file.getFileName(), listCount));
+			DEBUG_WARNING(listCount != 9, ("Template %s: read array size of %d for array \"maxAttributes\" of size 9, reading values anyway", file.getFileName(), listCount));
 			int j;
-			for (j = 0; j < 6 && j < listCount; ++j)
+			for (j = 0; j < 9 && j < listCount; ++j)
 				m_maxAttributes[j].loadFromIff(file);
 			// if there are more params for maxAttributes read and dump them
 			for (; j < listCount; ++j)
@@ -639,27 +639,27 @@ int count;
 	// save attributes
 	file.insertChunk(TAG(X, X, X, X));
 	file.insertChunkString("attributes");
-	count = 6;
+	count = 9;
 	file.insertChunkData(&count, sizeof(count));
-	{for (int i = 0; i < 6; ++i)
+	{for (int i = 0; i < 9; ++i)
 		m_attributes[i].saveToIff(file);}
 	file.exitChunk();
 	++paramCount;
 	// save minAttributes
 	file.insertChunk(TAG(X, X, X, X));
 	file.insertChunkString("minAttributes");
-	count = 6;
+	count = 9;
 	file.insertChunkData(&count, sizeof(count));
-	{for (int i = 0; i < 6; ++i)
+	{for (int i = 0; i < 9; ++i)
 		m_minAttributes[i].saveToIff(file);}
 	file.exitChunk();
 	++paramCount;
 	// save maxAttributes
 	file.insertChunk(TAG(X, X, X, X));
 	file.insertChunkString("maxAttributes");
-	count = 6;
+	count = 9;
 	file.insertChunkData(&count, sizeof(count));
-	{for (int i = 0; i < 6; ++i)
+	{for (int i = 0; i < 9; ++i)
 		m_maxAttributes[i].saveToIff(file);}
 	file.exitChunk();
 	++paramCount;

@@ -19,6 +19,7 @@
 #include "sharedObject/Controller.h"
 #include "sharedObject/NetworkIdManager.h"
 #include "sharedFoundation/NetworkId.h"
+#include "sharedLog/Log.h"
 
 //======================================================================
 
@@ -46,9 +47,34 @@ bool TangibleObject::startNpcConversation(TangibleObject & npc, const std::strin
 		if (npc.isPlayerControlled())
 			return false;
 
-		// test if already in a conversation
+		// A fresh player request is authoritative intent to begin a new
+		// conversation.  Recover an older session first so a lost client stop
+		// message or a script cleanup veto cannot pin all later interactions.
 		if (m_npcConversation != nullptr)
-			return false;
+		{
+			if (starter != NpcConversationData::CS_Player)
+			{
+				LOG("PreCuConversation", ("start rejected player=%s npc=%s reason=session-active starter=%d",
+					getNetworkId().getValueString().c_str(),
+					npc.getNetworkId().getValueString().c_str(),
+					static_cast<int>(starter)));
+				return false;
+			}
+
+			NetworkId const previousNpc = m_npcConversation->getNPC();
+			LOG("PreCuConversation", ("recover stale-session player=%s previousNpc=%s requestedNpc=%s",
+				getNetworkId().getValueString().c_str(),
+				previousNpc.getValueString().c_str(),
+				npc.getNetworkId().getValueString().c_str()));
+			endNpcConversation();
+			if (m_npcConversation != nullptr)
+			{
+				LOG("PreCuConversation", ("start rejected player=%s npc=%s reason=stale-session-cleanup-failed",
+					getNetworkId().getValueString().c_str(),
+					npc.getNetworkId().getValueString().c_str()));
+				return false;
+			}
+		}
 
 		if (starter == NpcConversationData::CS_Player)
 		{
@@ -70,6 +96,10 @@ bool TangibleObject::startNpcConversation(TangibleObject & npc, const std::strin
 				IGNORE_RETURN(getScriptObject()->trigAllScripts(Scripting::TRIG_START_CONVERSATION, playerParams));
 			}
 
+			LOG("PreCuConversation", ("player-trigger player=%s npc=%s result=%d",
+				getNetworkId().getValueString().c_str(),
+				npc.getNetworkId().getValueString().c_str(),
+				npcHadTrigger ? 1 : 0));
 			return npcHadTrigger;
 		}
 
@@ -85,6 +115,10 @@ bool TangibleObject::startNpcConversation(TangibleObject & npc, const std::strin
 		// update any proxies
 		addConversation(npc.getNetworkId());
 		npc.addConversation(getNetworkId());
+		LOG("PreCuConversation", ("session-started player=%s npc=%s conversation=%s",
+			getNetworkId().getValueString().c_str(),
+			npc.getNetworkId().getValueString().c_str(),
+			convoName.c_str()));
 	}
 	else
 	{
@@ -147,8 +181,12 @@ void TangibleObject::endNpcConversation()
 						overridden = true;
 					}
 
-					if(overridden)
-						return;
+					if (overridden)
+					{
+						LOG("PreCuConversation", ("ignored cleanup-veto player=%s npc=%s",
+							getNetworkId().getValueString().c_str(),
+							npc->getNetworkId().getValueString().c_str()));
+					}
 
 					// update any proxies
 					npc->removeConversation(getNetworkId());
@@ -162,8 +200,12 @@ void TangibleObject::endNpcConversation()
 				m_conversations.clear();
 			}
 
+			NetworkId const previousNpc = m_npcConversation->getNPC();
 			delete m_npcConversation;
 			m_npcConversation = nullptr;
+			LOG("PreCuConversation", ("session-ended player=%s npc=%s",
+				getNetworkId().getValueString().c_str(),
+				previousNpc.getValueString().c_str()));
 		}
 		else
 		{

@@ -168,7 +168,7 @@ int ServerCreatureObjectTemplate::getAttributes(Attributes index) const
 		base = dynamic_cast<const ServerCreatureObjectTemplate *>(m_baseData);
 	}
 
-	DEBUG_FATAL(index < 0 || index >= 6, ("template param index out of range"));
+	DEBUG_FATAL(index < 0 || index >= 9, ("template param index out of range"));
 	if (!m_attributes[index].isLoaded())
 	{
 		if (ms_allowDefaultTemplateParams && /*!m_versionOk &&*/ base == nullptr)
@@ -217,7 +217,7 @@ int ServerCreatureObjectTemplate::getAttributesMin(Attributes index) const
 		base = dynamic_cast<const ServerCreatureObjectTemplate *>(m_baseData);
 	}
 
-	DEBUG_FATAL(index < 0 || index >= 6, ("template param index out of range"));
+	DEBUG_FATAL(index < 0 || index >= 9, ("template param index out of range"));
 	if (!m_attributes[index].isLoaded())
 	{
 		if (ms_allowDefaultTemplateParams && /*!m_versionOk &&*/ base == nullptr)
@@ -266,7 +266,7 @@ int ServerCreatureObjectTemplate::getAttributesMax(Attributes index) const
 		base = dynamic_cast<const ServerCreatureObjectTemplate *>(m_baseData);
 	}
 
-	DEBUG_FATAL(index < 0 || index >= 6, ("template param index out of range"));
+	DEBUG_FATAL(index < 0 || index >= 9, ("template param index out of range"));
 	if (!m_attributes[index].isLoaded())
 	{
 		if (ms_allowDefaultTemplateParams && /*!m_versionOk &&*/ base == nullptr)
@@ -315,7 +315,7 @@ int ServerCreatureObjectTemplate::getMinAttributes(Attributes index) const
 		base = dynamic_cast<const ServerCreatureObjectTemplate *>(m_baseData);
 	}
 
-	DEBUG_FATAL(index < 0 || index >= 6, ("template param index out of range"));
+	DEBUG_FATAL(index < 0 || index >= 9, ("template param index out of range"));
 	if (!m_minAttributes[index].isLoaded())
 	{
 		if (ms_allowDefaultTemplateParams && /*!m_versionOk &&*/ base == nullptr)
@@ -364,7 +364,7 @@ int ServerCreatureObjectTemplate::getMinAttributesMin(Attributes index) const
 		base = dynamic_cast<const ServerCreatureObjectTemplate *>(m_baseData);
 	}
 
-	DEBUG_FATAL(index < 0 || index >= 6, ("template param index out of range"));
+	DEBUG_FATAL(index < 0 || index >= 9, ("template param index out of range"));
 	if (!m_minAttributes[index].isLoaded())
 	{
 		if (ms_allowDefaultTemplateParams && /*!m_versionOk &&*/ base == nullptr)
@@ -413,7 +413,7 @@ int ServerCreatureObjectTemplate::getMinAttributesMax(Attributes index) const
 		base = dynamic_cast<const ServerCreatureObjectTemplate *>(m_baseData);
 	}
 
-	DEBUG_FATAL(index < 0 || index >= 6, ("template param index out of range"));
+	DEBUG_FATAL(index < 0 || index >= 9, ("template param index out of range"));
 	if (!m_minAttributes[index].isLoaded())
 	{
 		if (ms_allowDefaultTemplateParams && /*!m_versionOk &&*/ base == nullptr)
@@ -462,7 +462,7 @@ int ServerCreatureObjectTemplate::getMaxAttributes(Attributes index) const
 		base = dynamic_cast<const ServerCreatureObjectTemplate *>(m_baseData);
 	}
 
-	DEBUG_FATAL(index < 0 || index >= 6, ("template param index out of range"));
+	DEBUG_FATAL(index < 0 || index >= 9, ("template param index out of range"));
 	if (!m_maxAttributes[index].isLoaded())
 	{
 		if (ms_allowDefaultTemplateParams && /*!m_versionOk &&*/ base == nullptr)
@@ -511,7 +511,7 @@ int ServerCreatureObjectTemplate::getMaxAttributesMin(Attributes index) const
 		base = dynamic_cast<const ServerCreatureObjectTemplate *>(m_baseData);
 	}
 
-	DEBUG_FATAL(index < 0 || index >= 6, ("template param index out of range"));
+	DEBUG_FATAL(index < 0 || index >= 9, ("template param index out of range"));
 	if (!m_maxAttributes[index].isLoaded())
 	{
 		if (ms_allowDefaultTemplateParams && /*!m_versionOk &&*/ base == nullptr)
@@ -560,7 +560,7 @@ int ServerCreatureObjectTemplate::getMaxAttributesMax(Attributes index) const
 		base = dynamic_cast<const ServerCreatureObjectTemplate *>(m_baseData);
 	}
 
-	DEBUG_FATAL(index < 0 || index >= 6, ("template param index out of range"));
+	DEBUG_FATAL(index < 0 || index >= 9, ("template param index out of range"));
 	if (!m_maxAttributes[index].isLoaded())
 	{
 		if (ms_allowDefaultTemplateParams && /*!m_versionOk &&*/ base == nullptr)
@@ -2377,9 +2377,9 @@ char paramName[MAX_NAME_SIZE];
 		else if (strcmp(paramName, "attributes") == 0)
 		{
 			int listCount = file.read_int32();
-			DEBUG_WARNING(listCount != 6, ("Template %s: read array size of %d for array \"attributes\" of size 6, reading values anyway", file.getFileName(), listCount));
+			DEBUG_WARNING(listCount != 9, ("Template %s: read array size of %d for array \"attributes\" of size 9, reading values anyway", file.getFileName(), listCount));
 			int j;
-			for (j = 0; j < 6 && j < listCount; ++j)
+			for (j = 0; j < 9 && j < listCount; ++j)
 				m_attributes[j].loadFromIff(file);
 			// if there are more params for attributes read and dump them
 			for (; j < listCount; ++j)
@@ -2391,9 +2391,9 @@ char paramName[MAX_NAME_SIZE];
 		else if (strcmp(paramName, "minAttributes") == 0)
 		{
 			int listCount = file.read_int32();
-			DEBUG_WARNING(listCount != 6, ("Template %s: read array size of %d for array \"minAttributes\" of size 6, reading values anyway", file.getFileName(), listCount));
+			DEBUG_WARNING(listCount != 9, ("Template %s: read array size of %d for array \"minAttributes\" of size 9, reading values anyway", file.getFileName(), listCount));
 			int j;
-			for (j = 0; j < 6 && j < listCount; ++j)
+			for (j = 0; j < 9 && j < listCount; ++j)
 				m_minAttributes[j].loadFromIff(file);
 			// if there are more params for minAttributes read and dump them
 			for (; j < listCount; ++j)
@@ -2405,9 +2405,9 @@ char paramName[MAX_NAME_SIZE];
 		else if (strcmp(paramName, "maxAttributes") == 0)
 		{
 			int listCount = file.read_int32();
-			DEBUG_WARNING(listCount != 6, ("Template %s: read array size of %d for array \"maxAttributes\" of size 6, reading values anyway", file.getFileName(), listCount));
+			DEBUG_WARNING(listCount != 9, ("Template %s: read array size of %d for array \"maxAttributes\" of size 9, reading values anyway", file.getFileName(), listCount));
 			int j;
-			for (j = 0; j < 6 && j < listCount; ++j)
+			for (j = 0; j < 9 && j < listCount; ++j)
 				m_maxAttributes[j].loadFromIff(file);
 			// if there are more params for maxAttributes read and dump them
 			for (; j < listCount; ++j)

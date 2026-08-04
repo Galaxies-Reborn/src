@@ -55,7 +55,7 @@ namespace GroupObjectNamespace
 {
 	// ----------------------------------------------------------------------
 
-	const uint32_t cs_maximumNumberInGroup = 8;
+	const uint32_t cs_maximumNumberInGroup = 24;
 	char const * const DEFAULT_GROUP_TEMPLATE = "object/group/group.iff";
 	std::map<NetworkId, NetworkId> s_leaderMap;
 	static const std::string cs_emptyString;
@@ -1405,14 +1405,8 @@ void GroupObject::setLootRule(int const rule)
 
 unsigned int GroupObject::getSecondsLeftOnGroupPickup() const
 {
-	std::pair<int32, int32> const & groupPickupTimer = m_groupPickupTimer.get();
-	if ((groupPickupTimer.first > 0) && (groupPickupTimer.second > 0))
-	{
-		time_t const timeNow = ::time(nullptr);
-		if (groupPickupTimer.second > timeNow)
-			return (groupPickupTimer.second - (int)timeNow);
-	}
-
+	// Persisted group-pickup fields are retained for database compatibility,
+	// but Publish 14.1 has no active group-pickup travel state.
 	return 0;
 }
 
@@ -1420,6 +1414,9 @@ unsigned int GroupObject::getSecondsLeftOnGroupPickup() const
 
 void GroupObject::setGroupPickupTimer(time_t startTime, time_t endTime)
 {
+	UNREF(startTime);
+	UNREF(endTime);
+
 	if (!isAuthoritative())
 	{
 		Controller *controller = getController();
@@ -1428,7 +1425,7 @@ void GroupObject::setGroupPickupTimer(time_t startTime, time_t endTime)
 			controller->appendMessage(
 				CM_setGroupPickupTimer,
 				0.0f,
-				new MessageQueueGenericValueType<std::pair<int32, int32> >(std::make_pair(static_cast<int32>(startTime), static_cast<int32>(endTime))),
+				new MessageQueueGenericValueType<std::pair<int32, int32> >(std::make_pair(0, 0)),
 				GameControllerMessageFlags::SEND |
 				GameControllerMessageFlags::RELIABLE |
 				GameControllerMessageFlags::DEST_AUTH_SERVER);
@@ -1436,7 +1433,7 @@ void GroupObject::setGroupPickupTimer(time_t startTime, time_t endTime)
 	}
 	else
 	{
-		m_groupPickupTimer.set(std::make_pair(static_cast<int32>(startTime), static_cast<int32>(endTime)));
+		m_groupPickupTimer.set(std::make_pair(0, 0));
 	}
 }
 
@@ -1444,6 +1441,9 @@ void GroupObject::setGroupPickupTimer(time_t startTime, time_t endTime)
 
 void GroupObject::setGroupPickupLocation(std::string const & planetName, Vector const & location)
 {
+	UNREF(planetName);
+	UNREF(location);
+
 	if (!isAuthoritative())
 	{
 		Controller *controller = getController();
@@ -1452,7 +1452,7 @@ void GroupObject::setGroupPickupLocation(std::string const & planetName, Vector 
 			controller->appendMessage(
 				CM_setGroupPickupLocation,
 				0.0f,
-				new MessageQueueGenericValueType<std::pair<std::string, Vector> >(std::make_pair(planetName, location)),
+				new MessageQueueGenericValueType<std::pair<std::string, Vector> >(std::make_pair(std::string(), Vector())),
 				GameControllerMessageFlags::SEND |
 				GameControllerMessageFlags::RELIABLE |
 				GameControllerMessageFlags::DEST_AUTH_SERVER);
@@ -1460,7 +1460,7 @@ void GroupObject::setGroupPickupLocation(std::string const & planetName, Vector 
 	}
 	else
 	{
-		m_groupPickupLocation.set(std::make_pair(planetName, location));
+		m_groupPickupLocation.set(std::make_pair(std::string(), Vector()));
 	}
 }
 

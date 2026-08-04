@@ -137,11 +137,14 @@ namespace TangibleObjectNamespace
 	std::string const s_attributeBonusNames[] =
 	{
 		"health",
-		"health_regen",
+		"strength",
+		"constitution",
 		"action",
-		"action_regen",
+		"quickness",
+		"stamina",
 		"mind",
-		"mind_regen"
+		"focus",
+		"willpower"
 	};
 
 	const char * const s_accessListScriptVar = "tangible_object.accessList";

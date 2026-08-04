@@ -390,6 +390,16 @@ private:
 	AUTO(double)          m_eventStartTime;
 
 	/**
+	 * @brief server-only time and interval of the last weapon-cadence attack.
+	 *
+	 * These values survive queue clearing and target changes for the lifetime of
+	 * the owner, preventing a cancelled post-attack timer from bypassing the
+	 * authoritative PRE-CU cadence gate.
+	 */
+	double                m_lastWeaponCadenceAttackTime;
+	float                 m_lastWeaponCadenceInterval;
+
+	/**
 	 * @brief a stack of command pointers that are used during
 	 * command execution.
 	 */

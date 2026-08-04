@@ -9,11 +9,13 @@
 #include "serverGame/ServerImageDesignerManager.h"
 
 #include "serverGame/Chat.h"
+#include "serverGame/CommandCppFuncs.h"
 #include "serverGame/ContainerInterface.h"
 #include "serverGame/CreatureObject.h"
 #include "serverGame/ServerObject.h"
 #include "serverGame/ServerObjectTemplate.h"
 #include "serverGame/ServerWorld.h"
+#include "serverGame/TriggerVolume.h"
 #include "sharedFoundation/ConstCharCrcLowerString.h"
 #include "sharedFoundation/ExitChain.h"
 #include "sharedGame/CustomizationManager.h"
@@ -180,6 +182,35 @@ bool ServerImageDesignerManager::makeChanges(SharedImageDesignerManager::Session
 	CreatureObject * const designer = designerServerObj ? designerServerObj->asCreatureObject() : nullptr;
 	if(designer && recipient)
 	{
+		bool const statMigration = session.designType == ImageDesignChangeMessage::DT_STAT_MIGRATION;
+		Object const * const designerTopmost = ContainerInterface::getTopmostContainer(*designer);
+		Object const * const recipientTopmost = ContainerInterface::getTopmostContainer(*recipient);
+		ServerObject const * const statMigrationVenue = ServerWorld::findObjectByNetworkId(session.terminalId);
+		bool const statMigrationSalon =
+			statMigrationVenue && statMigrationVenue->getObjVars().hasItem("salon") &&
+			designerTopmost && designerTopmost->getNetworkId() == session.terminalId &&
+			recipientTopmost && recipientTopmost->getNetworkId() == session.terminalId;
+		TriggerVolume const * const entertainmentCampVolume =
+			statMigrationVenue && statMigrationVenue->getObjVars().hasItem("modules.entertainer")
+				? statMigrationVenue->getTriggerVolume("campsite")
+				: nullptr;
+		bool const statMigrationEntertainmentCamp =
+			entertainmentCampVolume &&
+			entertainmentCampVolume->hasObject(*designer) &&
+			entertainmentCampVolume->hasObject(*recipient);
+		bool const statMigrationSessionValid = !statMigration ||
+			(designer != recipient &&
+			designer->hasCommand("imagedesign") &&
+			!recipient->isInTutorial() &&
+			session.terminalId != NetworkId::cms_invalid &&
+			(statMigrationSalon || statMigrationEntertainmentCamp) &&
+			CommandCppFuncs::canCommitStatMigration(recipient->getNetworkId()));
+		if(!statMigrationSessionValid)
+		{
+			WARNING(true, ("Rejected invalid Publish 14 stat migration Image Designer transaction for recipient %s",
+				recipient->getNetworkId().getValueString().c_str()));
+			return false;
+		}
 
 		//validate that any selected hair can go on this character
 		if(session.newHairSet)
@@ -313,6 +344,12 @@ bool ServerImageDesignerManager::makeChanges(SharedImageDesignerManager::Session
 		}
 
 		//OK, everything checks out, make all the changes NOW!
+		if(statMigration && !CommandCppFuncs::commitStatMigration(recipient->getNetworkId()))
+		{
+			WARNING(true, ("Unable to commit validated Publish 14 stat migration for recipient %s",
+				recipient->getNetworkId().getValueString().c_str()));
+			return false;
+		}
 
 		for(std::map<std::string, float>::const_iterator i = session.morphChanges.begin(); i != session.morphChanges.end(); ++i)
 		{

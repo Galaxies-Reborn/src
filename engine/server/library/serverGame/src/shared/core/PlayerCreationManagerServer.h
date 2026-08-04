@@ -24,7 +24,8 @@ public:
 	static void                   install ();
 	static void                   remove ();
 
-	static bool                   setupPlayer(CreatureObject & obj, const std::string & profession, StationId account, bool isJedi);
+	static bool                   isValidStartingProfession(const std::string & profession);
+	static bool                   setupPlayer(CreatureObject & obj, const std::string & profession, StationId account, bool isJedi, bool useNewbieTutorial);
 	static void                   renamePlayer(int8 renameCharacterMessageSource, uint32 stationId, const NetworkId & oid, const Unicode::String & newName, const Unicode::String & oldName, const NetworkId &requestedBy);
 };
 

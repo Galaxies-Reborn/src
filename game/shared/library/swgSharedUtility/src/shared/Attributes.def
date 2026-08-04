@@ -13,12 +13,15 @@
 namespace Attributes
 {			
 	const int Health = 0;
-	const int Constitution = 1;
-	const int Action = 2;
-	const int Stamina = 3;
-	const int Mind = 4;
-	const int Willpower = 5;
-	const int NumberOfAttributes = 6;  ///< NumberOfAttributes should always be the last entry in this structure.
+	const int Strength = 1;
+	const int Constitution = 2;
+	const int Action = 3;
+	const int Quickness = 4;
+	const int Stamina = 5;
+	const int Mind = 6;
+	const int Focus = 7;
+	const int Willpower = 8;
+	const int NumberOfAttributes = 9;  ///< NumberOfAttributes should always be the last entry in this structure.
 
 	typedef int Enumerator;   // Identifies which attribute
 	typedef int Value;        // Identifies the value of an attribute

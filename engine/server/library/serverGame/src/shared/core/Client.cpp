@@ -87,7 +87,6 @@
 #include "sharedNetworkMessages/CreateAuctionMessage.h"
 #include "sharedNetworkMessages/CreateImmediateAuctionMessage.h"
 #include "sharedNetworkMessages/CreateProjectileMessage.h"
-#include "sharedNetworkMessages/ExpertiseRequestMessage.h"
 #include "sharedNetworkMessages/FactionRequestMessage.h"
 #include "sharedNetworkMessages/FactionResponseMessage.h"
 #include "sharedNetworkMessages/GalaxyLoopTimesResponse.h"
@@ -1591,23 +1590,10 @@ void Client::receiveClientMessage(const GameNetworkMessage &message) {
                 break;
             }
             case constcrc("ExpertiseRequestMessage") : {
-                Archive::ReadIterator ri = static_cast<const GameNetworkMessage &>(message).getByteStream().begin();
-                ExpertiseRequestMessage const m(ri);
-
-                std::vector <std::string> const &addExpertisesNamesList = m.getAddExpertisesList();
-                bool clearAllExpertisesFirst = m.getClearAllExpertisesFirst();
-                std::string addList;
-                std::vector<std::string>::const_iterator i;
-                for (i = addExpertisesNamesList.begin(); i != addExpertisesNamesList.end(); ++i) {
-                    addList += " ";
-                    addList += *i;
-                }
                 CreatureObject *playerObject = safe_cast<CreatureObject *>(getCharacterObject());
                 if (playerObject) {
-                    LOG("CustomerService", ("ExpertiseRequestMessage: %s has requested to add expertises [%s] %s", PlayerObject::getAccountDescription(playerObject).c_str(), addList.c_str(), clearAllExpertisesFirst
-                                                                                                                                                                                               ? "(clearing first)"
-                                                                                                                                                                                               : ""));
-                    playerObject->processExpertiseRequest(addExpertisesNamesList, clearAllExpertisesFirst);
+                    LOG("PreCuRestore", ("Ignored retired NGE ExpertiseRequestMessage from %s",
+                        PlayerObject::getAccountDescription(playerObject).c_str()));
                 }
                 break;
             }
@@ -2330,4 +2316,3 @@ int Client::getBuddyPoints() const {
 }
 
 // ======================================================================
-

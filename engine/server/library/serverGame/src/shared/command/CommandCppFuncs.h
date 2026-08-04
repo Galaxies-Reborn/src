@@ -17,6 +17,8 @@ class CommandCppFuncs // static class
 public:
 	static void install();
 	static void remove();
+	static bool canCommitStatMigration(NetworkId const & actor);
+	static bool commitStatMigration(NetworkId const & actor);
 
 	static void commandFuncTransferMisc(Command const & c, NetworkId const &actor, NetworkId const &target, Unicode::String const & params);
 };

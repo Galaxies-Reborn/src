@@ -26,14 +26,20 @@ public:
 	static std::string const &getSceneId();
 	static std::string const &getTutorialTemplateName();
 	static ServerObject *createTutorial(Vector const &location);
+	static std::string const &getSkippedTutorialTemplateName();
+	static ServerObject *getOrCreateSkippedTutorial();
 
 	static Vector const &getStartCoords();
 	static std::string getStartCellName();
 	static Vector getTutorialLocation();
+	static Vector const &getSkippedTutorialLocation();
+	static Vector const &getSkippedTutorialStartCoords();
+	static std::string getSkippedTutorialStartCellName();
 
 	static void setupCharacterForTutorial(ServerObject* character);
 	static void setupCharacterToSkipTutorial(ServerObject* character);
 	static bool shouldStartTutorial(const ServerObject* character);
+	static bool shouldStartSkippedTutorial(const ServerObject* character);
 
 	static bool isInTutorial(const ServerObject* character);
 	static bool isInTutorialArea(const ServerObject* character);

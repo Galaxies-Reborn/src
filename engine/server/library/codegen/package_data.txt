@@ -74,6 +74,7 @@ CreatureObject              m_attributes             server               Attrib
 CreatureObject              m_baseRunSpeed           server               float
 CreatureObject              m_baseWalkSpeed          server               float
 CreatureObject              m_persistedBuffs         server               packed_map<uint32,Buff::PackedBuff> - encodePersistedBuffs(data,row->persisted_buffs); decodePersistedBuffs(data,row->persisted_buffs);
+CreatureObject              m_wounds                 server               Attributes::Value - encodeAttributes(objectId,data,18); decodeAttributes(objectId,data,isBaseline,18);
 
 CreatureObject              m_attributeModList       server_np            std::vector<AttribMod>
 CreatureObject              m_baseSlopeModPercent    server_np            float

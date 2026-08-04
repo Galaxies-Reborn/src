@@ -32,10 +32,13 @@ public:
 
 private: 
 	Archive::AutoVariable<int> m_health;
+	Archive::AutoVariable<int> m_strength;
 	Archive::AutoVariable<int> m_constitution;
 	Archive::AutoVariable<int> m_action;
+	Archive::AutoVariable<int> m_quickness;
 	Archive::AutoVariable<int> m_stamina;
 	Archive::AutoVariable<int> m_mind;
+	Archive::AutoVariable<int> m_focus;
 	Archive::AutoVariable<int> m_willpower;
 	Archive::AutoVariable<int> m_pointsLeft;
 };

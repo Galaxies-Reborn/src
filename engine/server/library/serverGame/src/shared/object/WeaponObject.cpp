@@ -17,6 +17,8 @@
 #include "sharedObject/ObjectTemplateList.h"
 #include "sharedObject/SlotIdManager.h"
 #include "sharedObject/SlottedContainer.h"
+#include "sharedUtility/DataTable.h"
+#include "sharedUtility/DataTableManager.h"
 #include <cstdio>
 
 //-- this include path is an error
@@ -28,6 +30,84 @@
 const SharedObjectTemplate * WeaponObject::m_defaultSharedTemplate = nullptr;
 static const std::string OBJVAR_CERTIFICATION = "weapon.strCertUsed";
 
+namespace WeaponObjectNamespace
+{
+	char const * const cs_precuWeaponSpeedsTable = "datatables/combat/precu_weapon_speeds.iff";
+
+	void getPrecuWeaponFamily(ServerWeaponObjectTemplate::WeaponType weaponType,
+		char const * & familyName, float & fallbackSpeed)
+	{
+		switch (weaponType)
+		{
+			case ServerWeaponObjectTemplate::WT_rifle:             familyName = "__family_rifle"; fallbackSpeed = 5.9f; break;
+			case ServerWeaponObjectTemplate::WT_lightRifle:        familyName = "__family_carbine"; fallbackSpeed = 3.6f; break;
+			case ServerWeaponObjectTemplate::WT_pistol:            familyName = "__family_pistol"; fallbackSpeed = 3.6f; break;
+			case ServerWeaponObjectTemplate::WT_heavyWeapon:       familyName = "__family_heavy"; fallbackSpeed = 7.8f; break;
+			case ServerWeaponObjectTemplate::WT_1handMelee:        familyName = "__family_onehandmelee"; fallbackSpeed = 4.5f; break;
+			case ServerWeaponObjectTemplate::WT_2handMelee:        familyName = "__family_twohandmelee"; fallbackSpeed = 4.8f; break;
+			case ServerWeaponObjectTemplate::WT_unarmed:           familyName = "__family_unarmed"; fallbackSpeed = 2.0f; break;
+			case ServerWeaponObjectTemplate::WT_polearm:           familyName = "__family_polearm"; fallbackSpeed = 5.1f; break;
+			case ServerWeaponObjectTemplate::WT_thrown:            familyName = "__family_thrown"; fallbackSpeed = 5.0f; break;
+			case ServerWeaponObjectTemplate::WT_1handLightsaber:   familyName = "__family_onehandlightsaber"; fallbackSpeed = 4.5f; break;
+			case ServerWeaponObjectTemplate::WT_2handLightsaber:   familyName = "__family_twohandlightsaber"; fallbackSpeed = 4.8f; break;
+			case ServerWeaponObjectTemplate::WT_polearmLightsaber: familyName = "__family_polearmlightsaber"; fallbackSpeed = 5.1f; break;
+			default:                                               familyName = "__family_default"; fallbackSpeed = 4.0f; break;
+		}
+	}
+
+	float getAuthoritativePrecuAttackSpeed(WeaponObject const & weapon)
+	{
+		char const * familyName = nullptr;
+		float fallbackSpeed = 4.0f;
+		getPrecuWeaponFamily(weapon.getWeaponType(), familyName, fallbackSpeed);
+
+		DataTable * const speedTable = DataTableManager::getTable(cs_precuWeaponSpeedsTable, true);
+		if (speedTable == nullptr)
+			return fallbackSpeed;
+
+		char const * const templateName = weapon.getObjectTemplateName();
+		int speedRow = templateName != nullptr ? speedTable->searchColumnString(0, templateName) : -1;
+		if (speedRow < 0)
+			speedRow = speedTable->searchColumnString(0, familyName);
+
+		float const authoritativeSpeed = speedRow >= 0
+			? speedTable->getFloatValue("attackSpeed", speedRow)
+			: fallbackSpeed;
+		DataTableManager::close(cs_precuWeaponSpeedsTable);
+
+		return authoritativeSpeed > 0.0f ? authoritativeSpeed : fallbackSpeed;
+	}
+
+	void normalizePrecuAttackSpeed(WeaponObject & weapon)
+	{
+		float const authoritativeSpeed = getAuthoritativePrecuAttackSpeed(weapon);
+		float const currentSpeed = weapon.getStoredAttackTime();
+
+		// NGE templates and persisted objects commonly carry 0.4-1.0 second
+		// speeds.  Preserve legitimate PRE-CU crafted variation, correcting
+		// only values implausibly faster than the authoritative baseline.
+		if (currentSpeed <= 0.0f || currentSpeed < authoritativeSpeed * 0.5f)
+			weapon.setAttackTime(authoritativeSpeed);
+	}
+}
+using namespace WeaponObjectNamespace;
+
+
+//-----------------------------------------------------------------------
+
+float WeaponObject::getAttackTime() const
+{
+	float const currentSpeed = getStoredAttackTime();
+	float const authoritativeSpeed = getAuthoritativePrecuAttackSpeed(*this);
+
+	// The load-time migration persists legacy NGE values when an object is
+	// loaded normally. Default weapons and lazily loaded contained objects
+	// can bypass that lifecycle callback, so combat must still fail closed to
+	// the Publish 14 cadence.
+	return currentSpeed <= 0.0f || currentSpeed < authoritativeSpeed * 0.5f
+		? authoritativeSpeed
+		: currentSpeed;
+}
 
 //-----------------------------------------------------------------------
 
@@ -118,6 +198,8 @@ void WeaponObject::initializeFirstTimeObject()
 	m_attackCost       = myTemplate->getAttackCost();
 	m_elementalType    = myTemplate->getElementalType();
 	m_elementalValue   = myTemplate->getElementalValue();
+
+	normalizePrecuAttackSpeed(*this);
 }	// WeaponObject::initializeFirstTimeObject
 
 //-----------------------------------------------------------------------
@@ -138,6 +220,8 @@ void WeaponObject::onLoadedFromDatabase()
 		m_minRange = myTemplate->getMinRange();
 	if (m_maxRange.get() < 0)
 		m_maxRange = myTemplate->getMaxRange();
+
+	normalizePrecuAttackSpeed(*this);
 
 }	// WeaponObject::initializeFirstTimeObject
 

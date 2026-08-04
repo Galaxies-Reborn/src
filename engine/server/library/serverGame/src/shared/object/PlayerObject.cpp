@@ -986,6 +986,12 @@ bool PlayerObject::revokeSchematic(uint32 schematicCrc, bool fromSkill)
 		{
 			// remove the schematic from the player's draft schematic list
 			Archive::AutoDeltaMap<std::pair<uint32, uint32>, int>::const_iterator found = m_draftSchematics.find(schematic->getCombinedCrc());
+			if (found == m_draftSchematics.end())
+			{
+				WARNING(true, ("PlayerObject::revokeSchematic could not find schematic %s on player %s",
+					schematic->getObjectTemplateName(), getAccountDescription().c_str()));
+				return false;
+			}
 			if ((*found).second > 1 && fromSkill)
 			{
 				m_draftSchematics.set(schematic->getCombinedCrc(), (*found).second - 1);
@@ -4289,21 +4295,9 @@ void PlayerObject::endBaselines()
 	{
 		GroupWaypointBuilder::updateGroupWaypoints(*this, true);
 
-		// calculate rank values when loaded for the first time from DB
-		Pvp::PvpRankInfo const & pvpRankInfo = Pvp::getRankInfo(m_currentGcwRating.get());
-		m_currentGcwRank = pvpRankInfo.rank;
-
-		if (pvpRankInfo.rank > 0)
-		{
-			m_currentGcwRankProgress = static_cast<float>(std::min(static_cast<int>(m_currentGcwRating.get()), pvpRankInfo.maxRating) - pvpRankInfo.minRating) * 100.0f / static_cast<float>(pvpRankInfo.maxRating - pvpRankInfo.minRating + 1);
-		}
-		else
-		{
-			m_currentGcwRankProgress = 0.0f;
-		}
-
-		m_maxGcwImperialRank = Pvp::getRankInfo(m_maxGcwImperialRating.get()).rank;
-		m_maxGcwRebelRank = Pvp::getRankInfo(m_maxGcwRebelRating.get()).rank;
+		// PRE-CU rank is CreatureObject::m_rank.  Remove persisted remnants of
+		// the later weekly GCW rating system before any client baselines use them.
+		retirePostNgeGcwRatingState();
 
 		// depersist chat statistics
 		int temp;
@@ -4403,6 +4397,20 @@ void PlayerObject::endBaselines()
 void PlayerObject::onLoadedFromDatabase()
 {
 	IntangibleObject::onLoadedFromDatabase();
+
+	// Remove the reusable waypoint left by the retired post-P14 group-pickup
+	// travel system. The misspelled key is the persisted live-game key.
+	std::string const retiredGroupPickupWaypointObjvar("reuseableWp.groupPickupWp");
+	DynamicVariableList const & objvars = getObjVars();
+	if (objvars.hasItem(retiredGroupPickupWaypointObjvar) &&
+		(objvars.getType(retiredGroupPickupWaypointObjvar) == DynamicVariable::NETWORK_ID))
+	{
+		NetworkId waypointId;
+		if (objvars.getItem(retiredGroupPickupWaypointObjvar, waypointId) && waypointId.isValid())
+			destroyWaypoint(waypointId);
+	}
+	if (objvars.hasItem(retiredGroupPickupWaypointObjvar))
+		removeObjVarItem(retiredGroupPickupWaypointObjvar);
 
 	// clear any deprecated quests
 	{
@@ -6671,6 +6679,11 @@ void PlayerObject::pickNewCurrentQuest()
 
 void PlayerObject::modifyCurrentGcwPoints(int const count, bool modifyLifetimeValue)
 {
+	UNREF(count);
+	UNREF(modifyLifetimeValue);
+	retirePostNgeGcwRatingState();
+	return;
+
 	CreatureObject * const owner = getCreatureObject();
 	if (!owner)
 		return;
@@ -6738,6 +6751,11 @@ void PlayerObject::modifyCurrentGcwPoints(int const count, bool modifyLifetimeVa
 
 void PlayerObject::modifyCurrentGcwRating(int const count, bool modifyMaxValue)
 {
+	UNREF(count);
+	UNREF(modifyMaxValue);
+	retirePostNgeGcwRatingState();
+	return;
+
 	CreatureObject * const owner = getCreatureObject();
 	if (!owner)
 		return;
@@ -6857,6 +6875,11 @@ void PlayerObject::modifyCurrentGcwRating(int const count, bool modifyMaxValue)
 
 void PlayerObject::modifyCurrentPvpKills(int const count, bool modifyLifetimeValue)
 {
+	UNREF(count);
+	UNREF(modifyLifetimeValue);
+	retirePostNgeGcwRatingState();
+	return;
+
 	CreatureObject * const owner = getCreatureObject();
 	if (!owner)
 		return;
@@ -6921,6 +6944,10 @@ void PlayerObject::modifyCurrentPvpKills(int const count, bool modifyLifetimeVal
 
 void PlayerObject::modifyLifetimeGcwPoints(int const count)
 {
+	UNREF(count);
+	retirePostNgeGcwRatingState();
+	return;
+
 	if (isAuthoritative())
 	{
 		static int64 const max = std::numeric_limits<int64>::max();
@@ -6946,6 +6973,10 @@ void PlayerObject::modifyLifetimeGcwPoints(int const count)
 
 void PlayerObject::modifyMaxGcwImperialRating(int const count)
 {
+	UNREF(count);
+	retirePostNgeGcwRatingState();
+	return;
+
 	if (isAuthoritative())
 	{
 		static int32 const min = std::numeric_limits<int32>::min() + 1;
@@ -6977,6 +7008,10 @@ void PlayerObject::modifyMaxGcwImperialRating(int const count)
 
 void PlayerObject::modifyMaxGcwRebelRating(int const count)
 {
+	UNREF(count);
+	retirePostNgeGcwRatingState();
+	return;
+
 	if (isAuthoritative())
 	{
 		static int32 const min = std::numeric_limits<int32>::min() + 1;
@@ -7008,6 +7043,10 @@ void PlayerObject::modifyMaxGcwRebelRating(int const count)
 
 void PlayerObject::modifyLifetimePvpKills(int const count)
 {
+	UNREF(count);
+	retirePostNgeGcwRatingState();
+	return;
+
 	if (isAuthoritative())
 	{
 		static int32 const max = std::numeric_limits<int32>::max();
@@ -7033,6 +7072,10 @@ void PlayerObject::modifyLifetimePvpKills(int const count)
 
 void PlayerObject::modifyNextGcwRatingCalcTime(int const weekCount)
 {
+	UNREF(weekCount);
+	retirePostNgeGcwRatingState();
+	return;
+
 	if (isAuthoritative())
 	{
 		// don't need to do anything if the player doesn't need rating recalculated
@@ -7096,6 +7139,17 @@ void PlayerObject::modifyNextGcwRatingCalcTime(int const weekCount)
 // ----------------------------------------------------------------------
 void PlayerObject::ctsUseOnlySetGcwInfo(int32 currentGcwPoints, int32 currentGcwRating, int32 currentPvpKills, int64 lifetimeGcwPoints, int32 maxGcwImperialRating, int32 maxGcwRebelRating, int32 lifetimePvpKills, int32 nextGcwRatingCalcTime)
 {
+	UNREF(currentGcwPoints);
+	UNREF(currentGcwRating);
+	UNREF(currentPvpKills);
+	UNREF(lifetimeGcwPoints);
+	UNREF(maxGcwImperialRating);
+	UNREF(maxGcwRebelRating);
+	UNREF(lifetimePvpKills);
+	UNREF(nextGcwRatingCalcTime);
+	retirePostNgeGcwRatingState();
+	return;
+
 	// should only be called on authoritative object
 	if (!isAuthoritative())
 		return;
@@ -7171,6 +7225,10 @@ void PlayerObject::ctsUseOnlySetGcwInfo(int32 currentGcwPoints, int32 currentGcw
 
 void PlayerObject::setNextGcwRatingCalcTime(bool const alwaysSendMessageToForRecalc)
 {
+	UNREF(alwaysSendMessageToForRecalc);
+	retirePostNgeGcwRatingState();
+	return;
+
 	// should only be called on authoritative object
 	if (!isAuthoritative())
 		return;
@@ -7223,6 +7281,9 @@ void PlayerObject::setNextGcwRatingCalcTime(bool const alwaysSendMessageToForRec
 
 void PlayerObject::handleRecalculateGcwRating()
 {
+	retirePostNgeGcwRatingState();
+	return;
+
 	// should only be called on authoritative object
 	if (!isAuthoritative())
 		return;
@@ -7361,21 +7422,38 @@ void PlayerObject::handleRecalculateGcwRating()
 
 void PlayerObject::sendRecalculateGcwRatingMessageTo(int delay)
 {
-	// cancel any pending messageTo
-	cancelMessageTo("C++RecalculateGcwRating");
-
-	// send new messageTo
-	int const adjustedDelay = std::max(5, delay);
-	MessageToQueue::getInstance().sendMessageToC(getNetworkId(), "C++RecalculateGcwRating", "", adjustedDelay, false);
-	m_gcwRatingActualCalcTime = static_cast<int32>(::time(nullptr) + adjustedDelay);
+	UNREF(delay);
+	retirePostNgeGcwRatingState();
 }
 
 // ----------------------------------------------------------------------
 
 bool PlayerObject::needsGcwRatingRecalculated() const
 {
-	Pvp::PvpRankInfo const & pvpRankInfo = Pvp::getRankInfo(m_currentGcwRating.get());
-	return ((m_currentGcwPoints.get() > 0) || (m_currentPvpKills.get() > 0) || ((pvpRankInfo.rank > 0) && (pvpRankInfo.ratingDecayBalance > 0)));
+	return false;
+}
+
+// ----------------------------------------------------------------------
+
+void PlayerObject::retirePostNgeGcwRatingState()
+{
+	if (!isAuthoritative())
+		return;
+
+	cancelMessageTo("C++RecalculateGcwRating");
+	m_currentGcwPoints = 0;
+	m_currentGcwRating = -1;
+	m_currentPvpKills = 0;
+	m_lifetimeGcwPoints = 0;
+	m_maxGcwImperialRating = -1;
+	m_maxGcwRebelRating = -1;
+	m_lifetimePvpKills = 0;
+	m_nextGcwRatingCalcTime = 0;
+	m_currentGcwRank = 0;
+	m_currentGcwRankProgress = 0.0f;
+	m_maxGcwImperialRank = 0;
+	m_maxGcwRebelRank = 0;
+	m_gcwRatingActualCalcTime = 0;
 }
 
 // ----------------------------------------------------------------------

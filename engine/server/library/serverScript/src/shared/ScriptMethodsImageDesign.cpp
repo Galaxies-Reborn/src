@@ -157,6 +157,20 @@ jboolean JNICALL ScriptMethodsImageDesignNamespace::imagedesignValidated(JNIEnv 
 	session.recipientPaidCredits = jrecipientPaidCredits;
 	session.accepted = jaccepted;
 
+	SharedImageDesignerManager::Session authenticatedSession;
+	bool const authenticated = SharedImageDesignerManager::getSession(session.designerId, authenticatedSession) &&
+		authenticatedSession.designerId == session.designerId &&
+		authenticatedSession.recipientId == session.recipientId &&
+		authenticatedSession.terminalId == session.terminalId &&
+		authenticatedSession.startingTime == session.startingTime &&
+		authenticatedSession.designType == session.designType;
+	if(!authenticated)
+	{
+		WARNING(true, ("Rejected unauthenticated Image Designer script validation for designer %s",
+			session.designerId.getValueString().c_str()));
+		return JNI_FALSE;
+	}
+
 	//if the session isn't valid, cancel it and don't apply changes
 	if(!session.accepted)
 	{

@@ -66,6 +66,7 @@ public:
 	int                                 getAttackCost         (void) const;
 
 	float                               getAttackTime(void) const;
+	float                               getStoredAttackTime(void) const;
 	void                                setAttackTime(float time);
 	
 	void                                setMinRange          (float range);
@@ -121,7 +122,7 @@ private:
 };
 
 
-inline float WeaponObject::getAttackTime(void) const
+inline float WeaponObject::getStoredAttackTime(void) const
 {
 	return m_attackSpeed.get();
 }

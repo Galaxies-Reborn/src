@@ -299,9 +299,12 @@ time_t SharedImageDesignerManager::getTimeRemaining(NetworkId const & designerId
 
 		endTime = session.startingTime + minimumPhysicalTime;
 	}
+	else if(session.designType == ImageDesignChangeMessage::DT_STAT_MIGRATION)
+	{
+		endTime = session.startingTime + ConfigSharedGame::getImageDesignerStatMigrationSessionTimeSeconds();
+	}
 	else
 	{
-		//this was for stat migration, and shouldn't be called anymore
 		endTime = session.startingTime;
 	}
 
@@ -658,10 +661,11 @@ bool SharedImageDesignerManager::hasSkillForHoloemote(std::string const & holoem
 */
 void SharedImageDesignerManager::updateDesignType(SharedImageDesignerManager::Session & /*IN OUT*/ session, std::string const & recipientSpeciesGender)
 {
+	bool const statMigrationRequested = session.designType == ImageDesignChangeMessage::DT_STAT_MIGRATION;
 	CustomizationManager::Customization customization;
 	bool result = false;
 
-	session.designType = ImageDesignChangeMessage::DT_COSMETIC;
+	session.designType = statMigrationRequested ? ImageDesignChangeMessage::DT_STAT_MIGRATION : ImageDesignChangeMessage::DT_COSMETIC;
 
 	for(std::map<std::string, float>::iterator i = session.morphChanges.begin(); i != session.morphChanges.end(); ++i)
 	{
@@ -670,7 +674,8 @@ void SharedImageDesignerManager::updateDesignType(SharedImageDesignerManager::Se
 		{
 			if(customization.modificationType == cms_physicalType)
 			{
-				session.designType = ImageDesignChangeMessage::DT_PHYSICAL;
+				if(!statMigrationRequested)
+					session.designType = ImageDesignChangeMessage::DT_PHYSICAL;
 				return;
 			}
 		}
@@ -683,11 +688,15 @@ void SharedImageDesignerManager::updateDesignType(SharedImageDesignerManager::Se
 		{
 			if(customization.modificationType == cms_physicalType)
 			{
-				session.designType = ImageDesignChangeMessage::DT_PHYSICAL;
+				if(!statMigrationRequested)
+					session.designType = ImageDesignChangeMessage::DT_PHYSICAL;
 				return;
 			}
 		}
 	}
+
+	if(statMigrationRequested)
+		session.designType = ImageDesignChangeMessage::DT_STAT_MIGRATION;
 }
 
 //----------------------------------------------------------------------

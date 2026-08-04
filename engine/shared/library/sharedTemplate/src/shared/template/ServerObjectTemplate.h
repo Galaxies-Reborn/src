@@ -71,10 +71,13 @@ public:
 	enum Attributes
 	{
 		AT_health,
+		AT_strength,
 		AT_constitution,
 		AT_action,
+		AT_quickness,
 		AT_stamina,
 		AT_mind,
+		AT_focus,
 		AT_willpower,
 		Attributes_Last = AT_willpower,
 	};

@@ -429,17 +429,23 @@ void PlayerCreationManager::loadRacialModifiers()
 		std::string const &maleTemplate   = dataTable.getStringValue("male_template",   row);
 		std::string const &femaleTemplate = dataTable.getStringValue("female_template", row);
 		int health                        = dataTable.getIntValue("health",       row);
+		int strength                      = dataTable.getIntValue("strength",     row);
 		int constitution                  = dataTable.getIntValue("constitution", row);
 		int action                        = dataTable.getIntValue("action",       row);
+		int quickness                     = dataTable.getIntValue("quickness",    row);
 		int stamina                       = dataTable.getIntValue("stamina",      row);
 		int mind                          = dataTable.getIntValue("mind",         row);
+		int focus                         = dataTable.getIntValue("focus",        row);
 		int willpower                     = dataTable.getIntValue("willpower",    row);
 
 		modifiers.push_back(health);
+		modifiers.push_back(strength);
 		modifiers.push_back(constitution);
 		modifiers.push_back(action);
+		modifiers.push_back(quickness);
 		modifiers.push_back(stamina);
 		modifiers.push_back(mind);
+		modifiers.push_back(focus);
 		modifiers.push_back(willpower);
 
 		std::string fullMaleTemplate   = sharedTemplatePre + maleTemplate   + sharedTemplatePost;
@@ -465,20 +471,26 @@ void PlayerCreationManager::loadProfessionModifiers()
 	dataTable.load(racialModsIff);
 
 	int max_health                        = 0;
+	int max_strength                      = 0;
 	int max_constitution                  = 0;
 	int max_action                        = 0;
+	int max_quickness                     = 0;
 	int max_stamina                       = 0;
 	int max_mind                          = 0;
+	int max_focus                         = 0;
 	int max_willpower                     = 0;
 
 	for (int row = 0; row < dataTable.getNumRows(); ++row)
 	{
 		std::string const &profession     = dataTable.getStringValue("profession",   row);
 		int health                        = dataTable.getIntValue   ("health",       row);
+		int strength                      = dataTable.getIntValue   ("strength",     row);
 		int constitution                  = dataTable.getIntValue   ("constitution", row);
 		int action                        = dataTable.getIntValue   ("action",       row);
+		int quickness                     = dataTable.getIntValue   ("quickness",    row);
 		int stamina                       = dataTable.getIntValue   ("stamina",      row);
 		int mind                          = dataTable.getIntValue   ("mind",         row);
+		int focus                         = dataTable.getIntValue   ("focus",        row);
 		int willpower                     = dataTable.getIntValue   ("willpower",    row);
 
 		//the maximum allowed value for a stat is the maximum of the profession-maxes.
@@ -491,23 +503,32 @@ void PlayerCreationManager::loadProfessionModifiers()
 			//store off the maxes of these values, used as a factor of racial maximums
 			if(health > max_health)
 				max_health = health;
+			if(strength > max_strength)
+				max_strength = strength;
 			if(constitution > max_constitution)
 				max_constitution = constitution;
 			if(action > max_action)
 				max_action = action;
+			if(quickness > max_quickness)
+				max_quickness = quickness;
 			if(stamina > max_stamina)
 				max_stamina = stamina;
 			if(mind > max_mind)
 				max_mind = mind;
+			if(focus > max_focus)
+				max_focus = focus;
 			if(willpower > max_willpower)
 				max_willpower = willpower;
 		}
 
 		modifiers.push_back(health);
+		modifiers.push_back(strength);
 		modifiers.push_back(constitution);
 		modifiers.push_back(action);
+		modifiers.push_back(quickness);
 		modifiers.push_back(stamina);
 		modifiers.push_back(mind);
+		modifiers.push_back(focus);
 		modifiers.push_back(willpower);
 
 		DEBUG_FATAL(modifiers.size() != s_numberOfAttributes, ("Bad number of	profession modifiers"));

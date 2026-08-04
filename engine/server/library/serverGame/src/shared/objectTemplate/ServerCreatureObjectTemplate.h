@@ -113,9 +113,9 @@ protected:
 private:
 	//Creature Attributes
 	StringParam m_defaultWeapon;		// //weapon to use if none is equipped
-	IntegerParam m_attributes[6];		// //initial value for attributes
-	IntegerParam m_minAttributes[6];		// //minimum value for attributes
-	IntegerParam m_maxAttributes[6];		// //maximum value for attributes
+	IntegerParam m_attributes[9];		// //initial value for attributes
+	IntegerParam m_minAttributes[9];		// //minimum value for attributes
+	IntegerParam m_maxAttributes[9];		// //maximum value for attributes
 	FloatParam m_minDrainModifier;		// //min drain rate in units/sec
 	FloatParam m_maxDrainModifier;		// //max drain rate in units/sec
 	FloatParam m_minFaucetModifier;		// //min regeneration rate in units/sec

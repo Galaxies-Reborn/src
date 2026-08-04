@@ -33,6 +33,10 @@
 #include "sharedNetworkMessages/MessageQueueCommandTimer.h"
 #include "sharedNetworkMessages/MessageQueueGenericValueType.h"
 #include "sharedObject/NetworkIdManager.h"
+#include "sharedSkillSystem/SkillManager.h"
+#include "sharedSkillSystem/SkillObject.h"
+#include "sharedUtility/DataTable.h"
+#include "sharedUtility/DataTableManager.h"
 
 // --------------------------------------------------------------------------
 
@@ -46,11 +50,11 @@ namespace CommandQueueNamespace
 #endif
 
 	/**
-	 * @brief the maximum number of combat commands that are allowed in
-	 * the queue at any given time.
+	 * NPCs retain the original bounded admission queue.  Player-controlled
+	 * creatures are exempt so Publish 14 clients can queue attacks freely.
 	 */
 	const uint32       cs_maxQueuedCombatCommands = 2;
-	
+
 	/**
 	 * @brief the number of seconds in a real-time day.
 	 *
@@ -70,6 +74,126 @@ namespace CommandQueueNamespace
 	 * @see Clock::getCurrentTime
 	 */
 	double             s_currentTime             = 0.f;
+
+	char const * const cs_precuCombatOverridesTable = "datatables/combat/precu_combat_overrides.iff";
+	char const * const cs_combatDataTable = "datatables/combat/combat_data.iff";
+	char const * const cs_precuNoviceScoutSkill = "outdoors_scout_novice";
+
+	bool canHarvestPrecuCreatureResources(CreatureObject const & creature)
+	{
+		SkillObject const * const noviceScout =
+			SkillManager::getInstance().getSkill(cs_precuNoviceScoutSkill);
+		return noviceScout != nullptr && creature.hasSkill(*noviceScout);
+	}
+
+	bool isWeaponCadenceAttack(Command const & command)
+	{
+		DataTable * const combatTable = DataTableManager::getTable(cs_combatDataTable, true);
+		if (combatTable == nullptr)
+			return false;
+
+		int const commandRow = combatTable->searchColumnString(0, command.m_commandName);
+		int const hitType = commandRow >= 0 && combatTable->findColumnNumber("hitType") >= 0
+			? combatTable->getIntValue("hitType", commandRow)
+			: 0;
+		DataTableManager::close(cs_combatDataTable);
+
+		// combat_data.iff defines ATTACK=-1 and DELAY_ATTACK=6.  Both are
+		// weapon attacks; heals, buffs, posture changes, and performances must
+		// retain their declared command duration.
+		return hitType == -1 || hitType == 6;
+	}
+
+	char const * getPrecuWeaponSpeedSkill(WeaponObject const & weapon)
+	{
+		switch (weapon.getWeaponType())
+		{
+			case ServerWeaponObjectTemplate::WT_rifle:             return "rifle_speed";
+			case ServerWeaponObjectTemplate::WT_lightRifle:        return "carbine_speed";
+			case ServerWeaponObjectTemplate::WT_pistol:            return "pistol_speed";
+			case ServerWeaponObjectTemplate::WT_heavyWeapon:       return "heavyweapon_speed";
+			case ServerWeaponObjectTemplate::WT_1handMelee:        return "onehandmelee_speed";
+			case ServerWeaponObjectTemplate::WT_2handMelee:        return "twohandmelee_speed";
+			case ServerWeaponObjectTemplate::WT_unarmed:           return "unarmed_speed";
+			case ServerWeaponObjectTemplate::WT_polearm:           return "polearm_speed";
+			case ServerWeaponObjectTemplate::WT_thrown:            return "thrown_speed";
+			case ServerWeaponObjectTemplate::WT_1handLightsaber:   return "onehandlightsaber_speed";
+			case ServerWeaponObjectTemplate::WT_2handLightsaber:   return "twohandlightsaber_speed";
+			case ServerWeaponObjectTemplate::WT_polearmLightsaber: return "polearmlightsaber_speed";
+			default:                                               return "";
+		}
+	}
+
+	float calculatePrecuAttackTime(CreatureObject & owner, WeaponObject const & weapon,
+		float weaponAttackSpeed, float speedMultiplier, std::string const & speedSkill)
+	{
+		// Core3 applies a fixed two-second command-queue interval to AI agents.
+		// Do this before inherited creature skill mods can collapse their attacks
+		// to the one-second player floor.
+		if (!owner.isPlayerControlled())
+			return 2.0f;
+
+		int speedModifier = speedSkill.empty() ? 0 : owner.getEnhancedModValue(speedSkill);
+		speedModifier += owner.getEnhancedModValue("private_speed_bonus");
+		if (weapon.getAttackType() == ServerWeaponObjectTemplate::AT_melee)
+		{
+			speedModifier += owner.getEnhancedModValue("private_melee_speed_bonus");
+			speedModifier += owner.getEnhancedModValue("melee_speed");
+		}
+		else if (weapon.getAttackType() == ServerWeaponObjectTemplate::AT_ranged)
+		{
+			speedModifier += owner.getEnhancedModValue("private_ranged_speed_bonus");
+			speedModifier += owner.getEnhancedModValue("ranged_speed");
+		}
+
+		float executeTime = (1.0f - static_cast<float>(speedModifier) / 100.0f) *
+			speedMultiplier * weaponAttackSpeed;
+		float const haste = static_cast<float>(owner.getEnhancedModValue("combat_haste")) / 100.0f;
+		if (haste > 0.0f)
+			executeTime *= 1.0f - haste;
+
+		return executeTime > 1.0f ? executeTime : 1.0f;
+	}
+
+	float getCommandExecuteTime(CreatureObject & owner, Command const & command)
+	{
+		WeaponObject * const weapon = owner.getCurrentWeapon();
+		if (command.isPrimaryCommand())
+		{
+			if (weapon == nullptr)
+				return 4.0f;
+
+			return calculatePrecuAttackTime(owner, *weapon, weapon->getAttackTime(), 1.0f,
+				getPrecuWeaponSpeedSkill(*weapon));
+		}
+
+		DataTable * const commandTable = DataTableManager::getTable(cs_precuCombatOverridesTable, true);
+		if (commandTable == nullptr)
+			return command.m_execTime;
+
+		int const commandRow = commandTable->searchColumnString(0, command.m_commandName);
+		float speedMultiplier = commandRow >= 0 && commandTable->findColumnNumber("speedMultiplier") >= 0
+			? commandTable->getFloatValue("speedMultiplier", commandRow)
+			: 0.0f;
+		DataTableManager::close(cs_precuCombatOverridesTable);
+
+		if (speedMultiplier <= 0.0f)
+		{
+			if (!isWeaponCadenceAttack(command))
+				return command.m_execTime;
+
+			// Expansion commands without a Publish 14 override are still attacks.
+			// Give them the neutral PRE-CU multiplier instead of the static NGE
+			// command delay so every ground attack shares one cadence gate.
+			speedMultiplier = 1.0f;
+		}
+
+		if (weapon == nullptr)
+			return 4.0f;
+
+		return calculatePrecuAttackTime(owner, *weapon, weapon->getAttackTime(), speedMultiplier,
+			getPrecuWeaponSpeedSkill(*weapon));
+	}
 	
 }
 using namespace CommandQueueNamespace;
@@ -87,6 +211,8 @@ CommandQueue::CommandQueue(ServerObject & owner) :
 	m_commandTimes        ( TimerClass_MAX ),
 	m_combatCount         ( 0 ),
 	m_eventStartTime      ( 0.0 ),
+	m_lastWeaponCadenceAttackTime( 0.0 ),
+	m_lastWeaponCadenceInterval( 0.0f ),
 	m_logCommandEnqueue   (false)
 {
 }
@@ -101,32 +227,26 @@ PropertyId CommandQueue::getClassPropertyId()
 
 bool CommandQueue::isFull() const
 {
-	// is it empty?
-	if ( m_combatCount.get() == 0 )
-	{
+	CreatureObject const * const creatureOwner = getServerOwner().asCreatureObject();
+	if (creatureOwner != nullptr && creatureOwner->isPlayerControlled())
 		return false;
-	}
-	
-	// is it at the max?
-	if ( m_combatCount.get() >= cs_maxQueuedCombatCommands )
-	{
+
+	if (m_combatCount.get() == 0)
+		return false;
+
+	if (m_combatCount.get() >= cs_maxQueuedCombatCommands)
 		return true;
-	}
-	
-	// test to see if the current command is waiting on a cooldown.  we're considered
-	// full if we're waiting on a cooldown timer
-	
-	if ( m_state.get() == State_Waiting && !m_queue.empty() )
+
+	if (m_state.get() == State_Waiting && !m_queue.empty())
 	{
-		const CommandQueueEntry &entry = *(m_queue.begin());
-	
-		if ( (getCooldownTimeLeft( entry.m_command->m_coolGroup ) > 0.f) ||
-			 (getCooldownTimeLeft( entry.m_command->m_coolGroup2) > 0.f) )
+		CommandQueueEntry const & entry = *(m_queue.begin());
+		if (getCooldownTimeLeft(entry.m_command->m_coolGroup) > 0.f ||
+			getCooldownTimeLeft(entry.m_command->m_coolGroup2) > 0.f)
 		{
 			return true;
 		}
 	}
-	
+
 	return false;
 }
 
@@ -134,6 +254,24 @@ bool CommandQueue::isFull() const
 
 void CommandQueue::enqueue(Command const &command, NetworkId const &targetId, Unicode::String const &params, uint32 sequenceId, bool clearable, Command::Priority priority)
 {
+	CreatureObject * const creatureOwner = getServerOwner().asCreatureObject();
+	if (command.m_commandName == "harvestCorpse" &&
+		creatureOwner != nullptr && creatureOwner->isPlayerControlled() &&
+		!canHarvestPrecuCreatureResources(*creatureOwner))
+	{
+		Chat::sendSystemMessage(
+			*creatureOwner,
+			Unicode::narrowToWide("You must have Novice Scout to harvest creature resources."),
+			Unicode::emptyString);
+		notifyClientOfCommandRemoval(
+			sequenceId, 0.0f, Command::CEC_Cancelled, 0);
+		LOG("PreCuScoutHarvest", ("rejected owner=%s command=%s target=%s",
+			creatureOwner->getNetworkId().getValueString().c_str(),
+			command.m_commandName.c_str(),
+			targetId.getValueString().c_str()));
+		return;
+	}
+
 	DEBUG_REPORT_LOG( cs_debug, ( "%f: CommandQueue::enqueue(%s, %s, %s, %d, %d, %d)\n",
 		Clock::getCurrentTime(),
 		command.m_commandName.c_str(),
@@ -175,41 +313,15 @@ void CommandQueue::enqueue(Command const &command, NetworkId const &targetId, Un
 
   		executeCommand(command, targetId, params, status, statusDetail, false);
 		notifyClientOfCommandRemoval(sequenceId, 0.0f, status, statusDetail);
-  	}
-  	else
-  	{
-	  	if ( command.m_addToCombatQueue && isFull() )
+	}
+	else
+	{
+		if (command.m_addToCombatQueue && isFull())
 		{
-			// we do special things if the command queue is full or the current command is waiting on a cooldown
-			// timer of combat actions and the player tries to add another
-			// combat action!
-			 
-			// look in the queue for a command to replace this with
-	
-			for ( EntryList::iterator it = m_queue.begin(); it != m_queue.end(); )
-			{
-				EntryList::iterator j = it++;
-				
-				// if there's a command warming up or executing then we can skip the first command in the queue
-				if ( m_state.get() != State_Waiting && j == m_queue.begin() )
-				{
-					continue;
-				}
-				
-				const CommandQueueEntry &entry = *j;
-				
-				// test to see of this command is a combat command
-				if ( entry.m_command->m_addToCombatQueue )
-				{					
-					// remove command from queue
-					m_queue.erase( j );
-					
-					// we want to end this loop
-					it = m_queue.end();
-				}
-			}
+			notifyClientOfCommandRemoval(sequenceId, 0.0f, Command::CEC_Cancelled, 0);
+			return;
 		}
-		
+
 		// create the command queue entry object
 		const CommandQueueEntry entry( command, targetId, params, sequenceId, clearable, priority, false );
 	   			
@@ -354,6 +466,28 @@ void CommandQueue::executeCommandQueue()
 			break;
 		}
 
+		CreatureObject * const creatureOwner = getServerOwner().asCreatureObject();
+		bool const weaponCadenceAttack = creatureOwner != nullptr && entry.m_command != nullptr &&
+			(entry.m_command->isPrimaryCommand() || isWeaponCadenceAttack(*entry.m_command));
+		if (m_state.get() == State_Waiting && weaponCadenceAttack &&
+			m_lastWeaponCadenceAttackTime > 0.0 && m_lastWeaponCadenceInterval > 0.0f)
+		{
+			double const earliestAttackTime = m_lastWeaponCadenceAttackTime +
+				static_cast<double>(m_lastWeaponCadenceInterval);
+			if (earliestAttackTime > s_currentTime)
+			{
+				m_nextEventTime = earliestAttackTime;
+				LOG("PreCuCombatCadence", ("gate time=%.3f owner=%s command=%s target=%s remaining=%.3f lastInterval=%.3f",
+					s_currentTime,
+					creatureOwner->getNetworkId().getValueString().c_str(),
+					entry.m_command->m_commandName.c_str(),
+					entry.m_targetId.getValueString().c_str(),
+					earliestAttackTime - s_currentTime,
+					m_lastWeaponCadenceInterval));
+				break;
+			}
+		}
+
 		switchState();
 
 		switch ( m_state.get() )
@@ -421,10 +555,80 @@ void CommandQueue::executeCommandQueue()
 
 void CommandQueue::doExecute(const CommandQueueEntry &entry )
 {
-	// execute command here
+	CreatureObject * const creatureOwner = getServerOwner().asCreatureObject();
 	m_status            = Command::CEC_Success;
 	m_statusDetail      = 0;
-	
+
+	if (creatureOwner != nullptr && entry.m_command != nullptr &&
+		entry.m_command->m_commandName == "harvestCorpse" &&
+		creatureOwner->isPlayerControlled() &&
+		!canHarvestPrecuCreatureResources(*creatureOwner))
+	{
+		Chat::sendSystemMessage(
+			*creatureOwner,
+			Unicode::narrowToWide("You must have Novice Scout to harvest creature resources."),
+			Unicode::emptyString);
+		m_status = Command::CEC_Cancelled;
+		LOG("PreCuScoutHarvest", ("rejected phase=execute owner=%s command=%s target=%s",
+			creatureOwner->getNetworkId().getValueString().c_str(),
+			entry.m_command->m_commandName.c_str(),
+			entry.m_targetId.getValueString().c_str()));
+		return;
+	}
+
+	bool const primaryAttack = entry.m_command != nullptr &&
+		entry.m_command->isPrimaryCommand();
+	bool const classifiedAttack = entry.m_command != nullptr &&
+		isWeaponCadenceAttack(*entry.m_command);
+	if (creatureOwner != nullptr && (primaryAttack || classifiedAttack))
+	{
+		WeaponObject const * const weapon = creatureOwner->getCurrentWeapon();
+		char const * const speedSkill = weapon != nullptr ?
+			getPrecuWeaponSpeedSkill(*weapon) : "";
+		int const familySpeed = weapon != nullptr && speedSkill[0] != '\0' ?
+			creatureOwner->getEnhancedModValue(speedSkill) : 0;
+		int const privateSpeed = creatureOwner->getEnhancedModValue("private_speed_bonus");
+		int const privateMeleeSpeed = creatureOwner->getEnhancedModValue("private_melee_speed_bonus");
+		int const meleeSpeed = creatureOwner->getEnhancedModValue("melee_speed");
+		int const privateRangedSpeed = creatureOwner->getEnhancedModValue("private_ranged_speed_bonus");
+		int const rangedSpeed = creatureOwner->getEnhancedModValue("ranged_speed");
+		int const combatHaste = creatureOwner->getEnhancedModValue("combat_haste");
+		m_lastWeaponCadenceAttackTime = s_currentTime;
+		m_lastWeaponCadenceInterval = m_commandTimes[TimerClass_Execute];
+		LOG("PreCuCombatCadence", ("execute time=%.3f owner=%s playerControlled=%d command=%s target=%s interval=%.3f weaponSpeed=%.3f queueSize=%u primary=%d classified=%d speedSkill=%s familySpeed=%d privateSpeed=%d privateMeleeSpeed=%d meleeSpeed=%d privateRangedSpeed=%d rangedSpeed=%d combatHaste=%d",
+			s_currentTime,
+			creatureOwner->getNetworkId().getValueString().c_str(),
+			creatureOwner->isPlayerControlled() ? 1 : 0,
+			entry.m_command->m_commandName.c_str(),
+			entry.m_targetId.getValueString().c_str(),
+			m_commandTimes[TimerClass_Execute],
+			weapon != nullptr ? weapon->getAttackTime() : 0.0f,
+			static_cast<unsigned int>(m_queue.size()),
+			primaryAttack ? 1 : 0,
+			classifiedAttack ? 1 : 0,
+			speedSkill,
+			familySpeed,
+			privateSpeed,
+			privateMeleeSpeed,
+			meleeSpeed,
+			privateRangedSpeed,
+			rangedSpeed,
+			combatHaste));
+	}
+	else if (creatureOwner != nullptr && entry.m_command != nullptr &&
+		creatureOwner->isPlayerControlled() && entry.m_command->m_addToCombatQueue)
+	{
+		LOG("PreCuCombatCadence", ("unclassified time=%.3f owner=%s command=%s target=%s declaredExecute=%.3f queueSize=%u",
+			s_currentTime,
+			creatureOwner->getNetworkId().getValueString().c_str(),
+			entry.m_command->m_commandName.c_str(),
+			entry.m_targetId.getValueString().c_str(),
+			entry.m_command->m_execTime,
+			static_cast<unsigned int>(m_queue.size())));
+	}
+
+	// execute command here
+
 	// push the command on the stack
 	m_commandStack.push( &entry );
 
@@ -618,7 +822,7 @@ bool CommandQueue::doWarmupTrigger(const CommandQueueEntry &entry )
 		
 			std::vector<float> timeValues;
 			timeValues.push_back( entry.m_command->m_warmTime );
-			timeValues.push_back( entry.m_command->m_execTime );
+			timeValues.push_back( m_commandTimes[ TimerClass_Execute ] );
 			timeValues.push_back( getCooldownTime(*entry.m_command) );
 			timeValues.push_back( entry.m_command->m_coolTime2 );
 		
@@ -689,7 +893,11 @@ void CommandQueue::switchState()
 	{
 		case State_Waiting:
 			// set timing info for execute and cooldown timers
-			m_commandTimes.set( TimerClass_Execute, entry.m_command->m_execTime );
+			m_commandTimes.set(
+				TimerClass_Execute,
+				getServerOwner().asCreatureObject() != nullptr
+					? getCommandExecuteTime(*getServerOwner().asCreatureObject(), *entry.m_command)
+					: entry.m_command->m_execTime);
 			m_commandTimes.set( TimerClass_Cooldown, getCooldownTime(*entry.m_command) );
 			m_commandTimes.set( TimerClass_Cooldown2, entry.m_command->m_coolTime2 );
 
@@ -698,7 +906,7 @@ void CommandQueue::switchState()
 			
 			if ( entry.m_command->m_warmTime < FLT_EPSILON )
 			{
-				if( entry.m_command->m_execTime < FLT_EPSILON )
+				if( m_commandTimes[ TimerClass_Execute ] < FLT_EPSILON )
 				{
 					// skipping both warmup and execute if both the timers are 0					
 					m_nextEventTime = s_currentTime;
@@ -784,7 +992,7 @@ void CommandQueue::switchState()
 					// here we skip the warmup state if the default warmup timer is 0
 					m_state = State_Execute;
 					
-					m_nextEventTime = s_currentTime + entry.m_command->m_execTime;
+					m_nextEventTime = s_currentTime + m_commandTimes[ TimerClass_Execute ];
 					
 					m_commandTimes.set( TimerClass_Warmup, 0.f );
 					
@@ -811,7 +1019,7 @@ void CommandQueue::switchState()
 
 		case State_Warmup:
 		
-			if(entry.m_command->m_execTime < FLT_EPSILON)
+			if(m_commandTimes[ TimerClass_Execute ] < FLT_EPSILON)
 			{
 				m_nextEventTime = s_currentTime;
 
@@ -892,7 +1100,7 @@ void CommandQueue::switchState()
 			{			
 				m_state = State_Execute;
 				
-				m_nextEventTime = s_currentTime + entry.m_command->m_execTime;
+				m_nextEventTime = s_currentTime + m_commandTimes[ TimerClass_Execute ];
 				
 				DEBUG_REPORT_LOG( cs_debug, ( "CommandQueue::switchState(): Warmup->Execute m_nextEventTime=%f m_commandTime=%f m_execTime=%f\n",
 					m_nextEventTime.get(),
@@ -937,40 +1145,28 @@ void CommandQueue::switchState()
 
 void CommandQueue::clearPendingCombatCommands()
 {
-	DEBUG_REPORT_LOG( cs_debug, ( "%s: attempting to cancel pending commands (queueSize=%d)\n", Unicode::wideToNarrow( getServerOwner().getObjectName() ).c_str(), m_queue.size() ) );
+	DEBUG_REPORT_LOG( cs_debug, ( "%s: attempting to cancel combat commands (queueSize=%d)\n", Unicode::wideToNarrow( getServerOwner().getObjectName() ).c_str(), m_queue.size() ) );
 	
 	for ( EntryList::iterator it = m_queue.begin(); it != m_queue.end(); )
 	{
-		EntryList::iterator j = it++;
-		
-		const CommandQueueEntry &entry = *j;
-
-		// if ( command is combat command )
-		// {
-		//    if ( ( command is at the top and is not executing ) or ( command is not at the top )
-		//    {
-		//       remove command		
-		//    }
-		// }
-
-		if ( entry.m_command->m_addToCombatQueue && ( j != m_queue.begin() || m_state.get() != State_Execute ) )
+		if ( !it->m_command->m_addToCombatQueue )
 		{
-
-			handleEntryRemoved(entry );
-			
-			if ( j == m_queue.begin() )
-			{
-				cancelCurrentCommand();
-			}
-			else
-			{
-				m_queue.erase( j );
-			}
-
+			++it;
+			continue;
 		}
 
+		if ( it == m_queue.begin() )
+		{
+			cancelCurrentCommand();
+			it = m_queue.begin();
+		}
+		else
+		{
+			EntryList::iterator const removed = it++;
+			handleEntryRemoved(*removed);
+			m_queue.erase(removed);
+		}
 	}
-	
 }
 
 // ----------------------------------------------------------------------
@@ -1455,15 +1651,7 @@ ServerObject const & CommandQueue::getServerOwner() const
 float CommandQueue::getCooldownTime(Command const &command)
 {
 	if(command.isPrimaryCommand())
-	{
-		CreatureObject * const creature = getServerOwner().asCreatureObject();
-		if(creature)
-		{
-			WeaponObject *weapon = creature->getCurrentWeapon();
-			if(weapon)
-				return weapon->getAttackTime();
-		}
-	}
+		return 0.0f;
 	return command.m_coolTime;
 }
 

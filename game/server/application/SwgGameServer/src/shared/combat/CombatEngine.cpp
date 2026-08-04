@@ -311,6 +311,13 @@ bool CombatEngine::onSuccessfulAttack(const TangibleObject & attacker,
 	TangibleObject & defender, int damageAmount, 
 	int hitLocation)
 {
+	return onSuccessfulAttack(attacker, defender, damageAmount, hitLocation, Attributes::Health);
+}
+
+bool CombatEngine::onSuccessfulAttack(const TangibleObject & attacker,
+	TangibleObject & defender, int damageAmount,
+	int hitLocation, Attributes::Enumerator targetPool)
+{
 	const bool creatureDefender = defender.asCreatureObject() != nullptr;
 	const bool isVehicle        = GameObjectTypes::isTypeOf (defender.getGameObjectType (), SharedObjectTemplate::GOT_vehicle);
 
@@ -331,7 +338,7 @@ bool CombatEngine::onSuccessfulAttack(const TangibleObject & attacker,
 	DamageList damageList;
 	if (creatureDefender && !isVehicle)
 	{
-		computeCreatureDamage(&hitLocationData, damageAmount, damageList);
+		computeCreatureDamage(&hitLocationData, damageAmount, targetPool, damageList);
 	}
 	else
 	{
@@ -604,11 +611,22 @@ void CombatEngine::computeCreatureDamage(
 	int damageDone, 
 	DamageList & damageList)
 {
-	// put all damage into health
+	computeCreatureDamage(hitLocation, damageDone, Attributes::Health, damageList);
+}
+
+void CombatEngine::computeCreatureDamage(
+	const ConfigCombatEngineData::BodyAttackMod *hitLocation,
+	int damageDone,
+	Attributes::Enumerator targetPool,
+	DamageList & damageList)
+{
+	if (targetPool != Attributes::Health && targetPool != Attributes::Action && targetPool != Attributes::Mind)
+		return;
+
 	damageList.push_back(AttribMod::AttribMod());
 	AttribMod::AttribMod & attribMod = damageList.back();
 	attribMod.tag = 0;
-	attribMod.attrib = Attributes::Health;
+	attribMod.attrib = targetPool;
 	attribMod.value = -damageDone;
 	attribMod.attack = 0.0f;
 	attribMod.sustain = 0.0f;

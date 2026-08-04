@@ -16,6 +16,7 @@
 #include "sharedFoundation/NetworkId.h"
 #include "sharedGame/SharedBuildoutAreaManager.h"
 #include "sharedFile/FileManifest.h"
+#include "sharedObject/CachedNetworkId.h"
 #include "sharedFile/TreeFile.h"
 #include "sharedLog/Log.h"
 #include "sharedObject/Container.h"
@@ -31,18 +32,22 @@
 namespace NewbieTutorialNamespace
 {
 	const std::string        s_sceneId("tutorial");
-	const std::string        s_tutorialTemplate("object/building/general/npe_hangar_1.iff");
+	const std::string        s_tutorialTemplate("object/building/general/newbie_hall.iff");
+	const std::string        s_skippedTutorialTemplate("object/building/general/newbie_hall_skipped.iff");
 
-	const Vector             s_startCoords(-12.5f, 0.0f, 19.5f);
-	const std::string        s_startCellName("medicalroom");
+	const Vector             s_startCoords(0.0f, 0.0f, -3.0f);
+	const std::string        s_startCellName("r1");
+	const Vector             s_skippedTutorialLocation(0.0f, 0.0f, 400.0f);
+	const Vector             s_skippedTutorialStartCoords(27.5f, -4.2f, -159.2f);
+	const std::string        s_skippedTutorialStartCellName("r1");
+	CachedNetworkId          s_skippedTutorial;
 
 	const float              s_tutorialMapWidth(16384.0f);
 	const float              s_tutorialSpacing(512.0f);
 	const int                s_sqrtMaxTutorials(static_cast<int>(s_tutorialMapWidth/s_tutorialSpacing));
 
-	const std::string        s_tutorialObjVar("npe.phase_number");
-	const std::string        s_skipTutorialObjVar("npe.skippingTutorial");
-	const int                s_tutorialResetThreshold(2);
+	const std::string        s_tutorialObjVar("newbie.startTutorial");
+	const std::string        s_skippedTutorialObjVar("newbie.startSkippedTutorial");
 
 	const std::string        s_freeTrialPlanets [] = {"tutorial", "space_npe_falcon", "space_ord_mantell"};
 	const int                s_numFreeTrialPlanets = sizeof (s_freeTrialPlanets) / sizeof (s_freeTrialPlanets[0]);
@@ -69,6 +74,13 @@ std::string const &NewbieTutorial::getTutorialTemplateName()
 
 // ----------------------------------------------------------------------
 
+std::string const &NewbieTutorial::getSkippedTutorialTemplateName()
+{
+	return s_skippedTutorialTemplate;
+}
+
+// ----------------------------------------------------------------------
+
 Vector NewbieTutorial::getTutorialLocation()
 {
 	// Pick a random spot, keep them 512m apart, and don't let them get too close to either axis because we are
@@ -78,8 +90,15 @@ Vector NewbieTutorial::getTutorialLocation()
 	{
 		x = s_tutorialSpacing*Random::random(s_sqrtMaxTutorials-1) - s_tutorialMapWidth/2.0f;
 		z = s_tutorialSpacing*Random::random(s_sqrtMaxTutorials-1) - s_tutorialMapWidth/2.0f;
-	} while (std::abs(x) < 300.0f || std::abs(z) < 300.0f);
+	} while (std::abs(x) < 300.0f || std::abs(z) < 300.0f || (x == s_skippedTutorialLocation.x && z == s_skippedTutorialLocation.z));
 	return Vector(x, 0.0f, z);
+}
+
+// ----------------------------------------------------------------------
+
+Vector const &NewbieTutorial::getSkippedTutorialLocation()
+{
+	return s_skippedTutorialLocation;
 }
 
 // ----------------------------------------------------------------------
@@ -102,6 +121,32 @@ ServerObject *NewbieTutorial::createTutorial(Vector const &location)
 
 // ----------------------------------------------------------------------
 
+ServerObject *NewbieTutorial::getOrCreateSkippedTutorial()
+{
+	FATAL(ServerWorld::getSceneId() != s_sceneId, ("Tried to create the skipped tutorial hall on a non-tutorial server."));
+
+	ServerObject *skippedTutorial = dynamic_cast<ServerObject *>(s_skippedTutorial.getObject());
+	if (skippedTutorial)
+		return skippedTutorial;
+
+	Transform tr;
+	tr.setPosition_p(s_skippedTutorialLocation);
+	skippedTutorial = ServerWorld::createNewObject(
+		s_skippedTutorialTemplate,
+		tr,
+		0,
+		false);
+	if (skippedTutorial)
+	{
+		skippedTutorial->addToWorld();
+		s_skippedTutorial = CachedNetworkId(*skippedTutorial);
+	}
+
+	return skippedTutorial;
+}
+
+// ----------------------------------------------------------------------
+
 Vector const &NewbieTutorial::getStartCoords()
 {
 	return s_startCoords;
@@ -116,10 +161,27 @@ std::string NewbieTutorial::getStartCellName()
 
 // ----------------------------------------------------------------------
 
+Vector const &NewbieTutorial::getSkippedTutorialStartCoords()
+{
+	return s_skippedTutorialStartCoords;
+}
+
+// ----------------------------------------------------------------------
+
+std::string NewbieTutorial::getSkippedTutorialStartCellName()
+{
+	return s_skippedTutorialStartCellName;
+}
+
+// ----------------------------------------------------------------------
+
 void NewbieTutorial::setupCharacterForTutorial(ServerObject* character)
 {
 	if (character)
+	{
+		character->removeObjVarItem(s_skippedTutorialObjVar);
 		character->setObjVarItem(s_tutorialObjVar, 1);
+	}
 }
 
 // ----------------------------------------------------------------------
@@ -127,7 +189,10 @@ void NewbieTutorial::setupCharacterForTutorial(ServerObject* character)
 void NewbieTutorial::setupCharacterToSkipTutorial(ServerObject* character)
 {
 	if (character)
-		character->setObjVarItem(s_skipTutorialObjVar, 1);
+	{
+		character->removeObjVarItem(s_tutorialObjVar);
+		character->setObjVarItem(s_skippedTutorialObjVar, 1);
+	}
 }
 
 // ----------------------------------------------------------------------
@@ -137,14 +202,7 @@ bool NewbieTutorial::shouldStartTutorial(const ServerObject* character)
 	if (character)
 	{
 		if (character->getObjVars().hasItem(s_tutorialObjVar))
-		{
-			int npePhase = 0;
-			character->getObjVars().getItem(s_tutorialObjVar, npePhase);
-
-			// if the player is in the shared space station or farther, don't restart the tutorial for them
-			if (npePhase <= s_tutorialResetThreshold)
-				return true;
-		}
+			return true;
 	}
 
 	return false;
@@ -152,13 +210,16 @@ bool NewbieTutorial::shouldStartTutorial(const ServerObject* character)
 
 // ----------------------------------------------------------------------
 
+bool NewbieTutorial::shouldStartSkippedTutorial(const ServerObject* character)
+{
+	return character && character->getObjVars().hasItem(s_skippedTutorialObjVar);
+}
+
+// ----------------------------------------------------------------------
+
 bool NewbieTutorial::isInTutorial(const ServerObject* character)
 {
-	if (character)
-		if (character->getObjVars().hasItem(s_tutorialObjVar))
-			return true;
-
-	return false;
+	return shouldStartTutorial(character) || shouldStartSkippedTutorial(character);
 }
 
 // ----------------------------------------------------------------------

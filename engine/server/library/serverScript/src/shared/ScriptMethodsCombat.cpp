@@ -99,6 +99,7 @@ namespace ScriptMethodsCombatNamespace
 	jboolean     JNICALL getWeaponData(JNIEnv *env, jobject self, jlong weapon, jobject weaponData);
 	jboolean     JNICALL doDamage(JNIEnv *env, jobject self, jlong attacker, jlong defender, jlong weapon, jint damage, jint hitLocation);
 	jboolean     JNICALL doDamageNoWeapon(JNIEnv *env, jobject self, jlong attacker, jlong defender, jint damage, jint hitLocation);
+	jboolean     JNICALL doDamageNoWeaponToPool(JNIEnv *env, jobject self, jlong attacker, jlong defender, jint damage, jint hitLocation, jint pool);
 	jboolean     JNICALL doCombatResults(JNIEnv *env, jobject self, jstring animationId, jobject attackerResult, jobjectArray defenderResult);
 	jboolean     JNICALL callDefenderCombatAction(JNIEnv *env, jobject self, jlongArray defenders, jintArray results, jlong attacker, jlong weapon);
 	void         JNICALL setWantSawAttackTriggers(JNIEnv *env, jobject self, jlong obj, jboolean enable);
@@ -176,6 +177,7 @@ const JNINativeMethod NATIVES[] = {
 	JF("__getWeaponData", "(JLscript/combat_engine$weapon_data;)Z", getWeaponData),
 	JF("__doDamage", "(JJJII)Z", doDamage),
 	JF("__doDamageNoWeapon", "(JJII)Z", doDamageNoWeapon),
+	JF("__doDamageNoWeaponToPool", "(JJIII)Z", doDamageNoWeaponToPool),
 	JF("doCombatResults", "(Ljava/lang/String;Lscript/base_class$attacker_results;[Lscript/base_class$defender_results;)Z", doCombatResults),
 	JF("_callDefenderCombatAction", "([J[IJJ)Z", callDefenderCombatAction),
 	JF("_setWantSawAttackTriggers", "(JZ)V", setWantSawAttackTriggers),
@@ -1640,6 +1642,27 @@ jboolean JNICALL ScriptMethodsCombatNamespace::doDamageNoWeapon(JNIEnv *env, job
 		return JNI_TRUE;
 	return JNI_FALSE;
 }	// JavaLibrary::doDamage
+
+jboolean JNICALL ScriptMethodsCombatNamespace::doDamageNoWeaponToPool(JNIEnv *env, jobject self, jlong attackerId, jlong defenderId, jint damage, jint hitLocation, jint pool)
+{
+	UNREF(self);
+
+	if (damage <= 0)
+		return JNI_TRUE;
+	if (pool < 0 || pool >= 3)
+		return JNI_FALSE;
+
+	TangibleObject * attacker = nullptr;
+	if (!JavaLibrary::getObject(attackerId, attacker))
+		return JNI_FALSE;
+
+	TangibleObject * defender = nullptr;
+	if (!JavaLibrary::getObject(defenderId, defender))
+		return JNI_FALSE;
+
+	bool const result = CombatEngine::onSuccessfulAttack(*attacker, *defender, damage, hitLocation, Attributes::POOLS[pool]);
+	return result ? JNI_TRUE : JNI_FALSE;
+}
 
 // ------------------------------------------------------------------------------------
 

@@ -1152,6 +1152,18 @@ void PlayerCreatureController::handleMessage (const int message, const float val
 				NetworkId const & myId = owner->getNetworkId();
 				NetworkId const & designerId = inMsg->getDesignerId();
 				NetworkId const & recipientId = inMsg->getRecipientId();
+				SharedImageDesignerManager::Session authenticatedSession;
+				bool const authenticated = SharedImageDesignerManager::getSession(designerId, authenticatedSession) &&
+					authenticatedSession.designerId == designerId &&
+					authenticatedSession.recipientId == recipientId &&
+					authenticatedSession.terminalId == inMsg->getTerminalId();
+				bool const statMigrationAllowed = inMsg->getDesignType() != ImageDesignChangeMessage::DT_STAT_MIGRATION ||
+					(authenticatedSession.terminalId != NetworkId::cms_invalid && designerId != recipientId);
+				if(!authenticated || !statMigrationAllowed || (myId != designerId && myId != recipientId))
+				{
+					WARNING(true, ("Rejected unauthenticated Image Designer change from %s", myId.getValueString().c_str()));
+					break;
+				}
 				Object const * const designerObj = NetworkIdManager::getObjectById(designerId);
 				ServerObject const * const designerServer = designerObj ? designerObj->asServerObject() : nullptr;
 				CreatureObject const * const designer = designerServer ? designerServer->asCreatureObject() : nullptr;
@@ -1217,10 +1229,7 @@ void PlayerCreatureController::handleMessage (const int message, const float val
 							SharedImageDesignerManager::Session session(*inMsg);
 
 							//get the server-stored session, so we can get the real starting time
-							SharedImageDesignerManager::Session serverSession;
-							bool const result = SharedImageDesignerManager::getSession(session.designerId, serverSession);
-							if(result)
-								session.startingTime = serverSession.startingTime;
+							session.startingTime = authenticatedSession.startingTime;
 							//ensure we validate against the server's skill mod data
 							SharedImageDesignerManager::SkillMods const skillMods = ServerImageDesignerManager::getSkillModsForDesigner(session.designerId);
 							session.bodySkillMod = skillMods.bodySkillMod;
@@ -1281,7 +1290,11 @@ void PlayerCreatureController::handleMessage (const int message, const float val
 				//cancel the session on the server
 				SharedImageDesignerManager::Session session;
 				bool const result = SharedImageDesignerManager::getSession(inMsg->getDesignerId(), session);
-				if(result)
+				bool const authenticated = result &&
+					session.designerId == inMsg->getDesignerId() &&
+					session.recipientId == inMsg->getRecipientId() &&
+					(owner->getNetworkId() == session.designerId || owner->getNetworkId() == session.recipientId);
+				if(authenticated)
 				{
 					//if the recipient canceled the session, tell the designer
 					Object const * const designerObject = NetworkIdManager::getObjectById(session.designerId);
@@ -1289,7 +1302,7 @@ void PlayerCreatureController::handleMessage (const int message, const float val
 					if(designer && (owner->getNetworkId() != session.designerId))
 						Chat::sendSystemMessage(*designer, SharedStringIds::imagedesigner_canceled_by_recip, Unicode::emptyString);
 
-					ServerImageDesignerManager::cancelSession(inMsg->getDesignerId(), inMsg->getRecipientId());
+					ServerImageDesignerManager::cancelSession(session.designerId, session.recipientId);
 				}
 			}
 		}
@@ -2019,12 +2032,49 @@ uint32 PlayerCreatureController::getCurSyncStamp() const
 
 // ----------------------------------------------------------------------
 
+void PlayerCreatureController::sendEmptyObjectMenuResponse(MessageQueueObjectMenuRequest const *msg)
+{
+	CreatureObject * const creatureOwner = NON_NULL(getCreature());
+	if (!msg || !creatureOwner->isAuthoritative())
+		return;
+
+	LOG("PreCuObjectMenu", ("response actor=%s target=%s sequence=%u items=0 reason=empty",
+		creatureOwner->getNetworkId().getValueString().c_str(),
+		msg->getTargetId().getValueString().c_str(),
+		static_cast<unsigned int>(msg->m_sequence)));
+
+	RadialMenuManager::DataVector emptyMenuInfo;
+	appendMessage(
+		CM_objectMenuResponse,
+		0.0f,
+		new MessageQueueObjectMenuRequest(
+			msg->getTargetId(),
+			creatureOwner->getNetworkId(),
+			emptyMenuInfo,
+			msg->m_sequence),
+		GameControllerMessageFlags::SEND | GameControllerMessageFlags::RELIABLE | GameControllerMessageFlags::DEST_AUTH_CLIENT);
+}
+
+// ----------------------------------------------------------------------
+
 void PlayerCreatureController::handleObjectMenuRequest(MessageQueueObjectMenuRequest const *msg)
 {
 	CreatureObject * const creatureOwner = NON_NULL(getCreature());
 	if (msg && creatureOwner->isAuthoritative())
 	{
+		LOG("PreCuObjectMenu", ("request actor=%s target=%s sequence=%u clientItems=%u",
+			creatureOwner->getNetworkId().getValueString().c_str(),
+			msg->getTargetId().getValueString().c_str(),
+			static_cast<unsigned int>(msg->m_sequence),
+			static_cast<unsigned int>(msg->getData().size())));
 		ServerObject * const target = safe_cast<ServerObject *>(NetworkIdManager::getObjectById(msg->getTargetId()));
+		if (!target)
+		{
+			WARNING(true, ("Object menu request target [%s] is unavailable; returning an empty response", msg->getTargetId().getValueString().c_str()));
+			sendEmptyObjectMenuResponse(msg);
+			return;
+		}
+
 		if (target)
 		{
 			if (!target->isAuthoritative())
@@ -2034,6 +2084,12 @@ void PlayerCreatureController::handleObjectMenuRequest(MessageQueueObjectMenuReq
 					std::make_pair(
 						ContainerInterface::getTopmostContainer(*creatureOwner)->getNetworkId(),
 						ContainerInterface::getTopmostContainer(*target)->getNetworkId()));
+				LOG("PreCuObjectMenu", ("route actor=%s target=%s sequence=%u actorTop=%s targetTop=%s reason=target-not-authoritative",
+					creatureOwner->getNetworkId().getValueString().c_str(),
+					target->getNetworkId().getValueString().c_str(),
+					static_cast<unsigned int>(msg->m_sequence),
+					ContainerInterface::getTopmostContainer(*creatureOwner)->getNetworkId().getValueString().c_str(),
+					ContainerInterface::getTopmostContainer(*target)->getNetworkId().getValueString().c_str()));
 				GameServer::getInstance().sendToPlanetServer(rssMessage);
 			}
 			else
@@ -2067,7 +2123,10 @@ void PlayerCreatureController::handleObjectMenuRequest(MessageQueueObjectMenuReq
 					// Holocron check.
 					Object const * const containedByObj = ContainerInterface::getContainedByObject(*target);
 					if(containedByObj && containedByObj->asServerObject() && ( containedByObj->asServerObject()->getGameObjectType() == SharedObjectTemplate::GOT_chronicles_quest_holocron || containedByObj->asServerObject()->getGameObjectType() == SharedObjectTemplate::GOT_chronicles_quest_holocron_recipe ) )
+					{
+						sendEmptyObjectMenuResponse(msg);
 						return; // No menus for Holocron contained items.
+					}
 
 					bool addedRotateMenuItems = false;
 					std::string positiveRotateDegree;
@@ -2177,11 +2236,22 @@ void PlayerCreatureController::handleObjectMenuRequest(MessageQueueObjectMenuReq
 						}
 					}
 
+					LOG("PreCuObjectMenu", ("response actor=%s target=%s sequence=%u items=%u reason=script-complete",
+						creatureOwner->getNetworkId().getValueString().c_str(),
+						target->getNetworkId().getValueString().c_str(),
+						static_cast<unsigned int>(msg->m_sequence),
+						static_cast<unsigned int>(resultMenuInfo.size())));
+
 					appendMessage(
 						CM_objectMenuResponse,
 						0.0f,
 						new MessageQueueObjectMenuRequest(target->getNetworkId(), creatureOwner->getNetworkId(), resultMenuInfo, msg->m_sequence),
 						GameControllerMessageFlags::SEND|GameControllerMessageFlags::RELIABLE|GameControllerMessageFlags::DEST_AUTH_CLIENT);
+				}
+				else
+				{
+					WARNING(true, ("Object menu request target [%s] has no script object; returning an empty response", target->getNetworkId().getValueString().c_str()));
+					sendEmptyObjectMenuResponse(msg);
 				}
 			}
 		}

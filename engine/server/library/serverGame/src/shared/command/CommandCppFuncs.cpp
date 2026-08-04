@@ -81,12 +81,10 @@
 #include "sharedGame/Command.h"
 #include "sharedGame/CommandTable.h"
 #include "sharedGame/CustomizationManager.h"
-#include "sharedGame/GroupPickupPoint.h"
 #include "sharedGame/GuildRankDataTable.h"
 #include "sharedGame/PlayerFormationManager.h"
 #include "sharedGame/GameLanguageManager.h"
 #include "sharedGame/GameObjectTypes.h"
-#include "sharedGame/TravelPoint.h"
 #include "sharedUtility/Location.h"
 #include "sharedGame/MatchMakingCharacterPreferenceId.h"
 #include "sharedGame/MatchMakingCharacterProfileId.h"
@@ -94,6 +92,7 @@
 #include "sharedGame/MoodManager.h"
 #include "sharedGame/OutOfBandPackager.h"
 #include "sharedGame/PlatformFeatureBits.h"
+#include "sharedGame/PlayerCreationManager.h"
 #include "sharedGame/ProsePackage.h"
 #include "sharedGame/Quest.h"
 #include "sharedGame/QuestManager.h"
@@ -122,6 +121,7 @@
 #include "sharedNetworkMessages/MessageQueuePosture.h"
 #include "sharedNetworkMessages/MessageQueueSitOnObject.h"
 #include "sharedNetworkMessages/MessageQueueSpatialChat.h"
+#include "sharedNetworkMessages/StatMigrationTargetsMessage.h"
 #include "sharedObject/CachedNetworkId.h"
 #include "sharedObject/CellProperty.h"
 #include "sharedObject/ContainedByProperty.h"
@@ -135,12 +135,168 @@
 #include "sharedSkillSystem/SkillManager.h"
 #include "sharedSkillSystem/SkillObject.h"
 #include "sharedTerrain/TerrainObject.h"
+#include "swgSharedUtility/Attributes.h"
 
+#include <algorithm>
 #include <cstdlib>
+#include <map>
+#include <vector>
 
 namespace CommandCppFuncsNamespace
 {
 	const std::string BEAST_SCRIPT = "ai.beast";
+
+	struct StatMigrationSession
+	{
+		StatMigrationSession() : targets(), pointsLeft(0) {}
+		std::vector<int> targets;
+		int pointsLeft;
+	};
+
+	typedef std::map<NetworkId, StatMigrationSession> StatMigrationSessionMap;
+	StatMigrationSessionMap s_statMigrationSessions;
+
+	char const * const cms_statMigrationObjVarRoot = "precu.statMigration";
+	char const * const cms_statMigrationObjVarTargets = "precu.statMigration.targets";
+	char const * const cms_statMigrationObjVarState = "precu.statMigration.state";
+	int const cms_statMigrationStatePending = 1;
+	int const cms_statMigrationStateCommitting = 2;
+
+	bool getStatMigrationLimits(CreatureObject const & creature, std::vector<std::pair<int, int> > & limits, int & total)
+	{
+		char const * const sharedTemplateName = creature.getSharedTemplateName();
+		return sharedTemplateName &&
+			PlayerCreationManager::getRacialMinMaxes(sharedTemplateName, limits) &&
+			PlayerCreationManager::getRacialTotal(sharedTemplateName, total) &&
+			static_cast<int>(limits.size()) == Attributes::NumberOfAttributes;
+	}
+
+	bool initializeStatMigrationSession(CreatureObject const & creature, StatMigrationSession & session)
+	{
+		std::vector<std::pair<int, int> > limits;
+		int total = 0;
+		if (!getStatMigrationLimits(creature, limits, total))
+			return false;
+
+		session.targets.assign(Attributes::NumberOfAttributes, 0);
+		int assigned = 0;
+		for (int attribute = 0; attribute < Attributes::NumberOfAttributes; ++attribute)
+		{
+			int const current = creature.getUnmodifiedMaxAttribute(attribute);
+			int const bounded = std::max(limits[attribute].first, std::min(limits[attribute].second, current));
+			session.targets[attribute] = bounded;
+			assigned += bounded;
+		}
+
+		// NGE-era persisted characters can be outside the authentic Publish 14
+		// allocation window. Clamp first, then deterministically remove any
+		// overage while never crossing a racial minimum.
+		int excess = assigned - total;
+		for (int attribute = 0; attribute < Attributes::NumberOfAttributes && excess > 0; ++attribute)
+		{
+			int const reducible = session.targets[attribute] - limits[attribute].first;
+			int const reduction = std::min(excess, reducible);
+			session.targets[attribute] -= reduction;
+			excess -= reduction;
+			assigned -= reduction;
+		}
+		if (excess > 0)
+			return false;
+
+		session.pointsLeft = total - assigned;
+		return session.pointsLeft >= 0;
+	}
+
+	bool validateStatMigrationTargets(CreatureObject const & creature, std::vector<int> const & targets)
+	{
+		std::vector<std::pair<int, int> > limits;
+		int total = 0;
+		if (static_cast<int>(targets.size()) != Attributes::NumberOfAttributes ||
+			!getStatMigrationLimits(creature, limits, total))
+			return false;
+
+		int assigned = 0;
+		for (int attribute = 0; attribute < Attributes::NumberOfAttributes; ++attribute)
+		{
+			if (targets[attribute] < limits[attribute].first || targets[attribute] > limits[attribute].second)
+				return false;
+			assigned += targets[attribute];
+		}
+		return assigned == total;
+	}
+
+	void clearPersistentStatMigration(CreatureObject & creature)
+	{
+		creature.removeObjVarItem(cms_statMigrationObjVarRoot);
+	}
+
+	bool persistStatMigration(CreatureObject & creature, StatMigrationSession const & session)
+	{
+		if (session.pointsLeft != 0 || !validateStatMigrationTargets(creature, session.targets))
+			return false;
+
+		// The state marker is written last. A server stop between these writes
+		// leaves a fail-closed partial record that will never be accepted.
+		clearPersistentStatMigration(creature);
+		if (!creature.setObjVarItem(cms_statMigrationObjVarTargets, session.targets) ||
+			!creature.setObjVarItem(cms_statMigrationObjVarState, cms_statMigrationStatePending))
+		{
+			clearPersistentStatMigration(creature);
+			return false;
+		}
+		return true;
+	}
+
+	bool loadPersistentStatMigration(CreatureObject & creature, StatMigrationSession & session)
+	{
+		int state = 0;
+		std::vector<int> targets;
+		if (!creature.getObjVars().getItem(cms_statMigrationObjVarState, state) ||
+			state != cms_statMigrationStatePending ||
+			!creature.getObjVars().getItem(cms_statMigrationObjVarTargets, targets) ||
+			!validateStatMigrationTargets(creature, targets))
+		{
+			if (creature.getObjVars().hasItem(cms_statMigrationObjVarRoot))
+				clearPersistentStatMigration(creature);
+			return false;
+		}
+
+		session.targets = targets;
+		session.pointsLeft = 0;
+		return true;
+	}
+
+	StatMigrationSession * findOrLoadPersistentStatMigration(CreatureObject & creature)
+	{
+		StatMigrationSessionMap::iterator session = s_statMigrationSessions.find(creature.getNetworkId());
+		if (session != s_statMigrationSessions.end())
+			return &session->second;
+
+		StatMigrationSession restored;
+		if (!loadPersistentStatMigration(creature, restored))
+			return nullptr;
+
+		return &s_statMigrationSessions.insert(std::make_pair(creature.getNetworkId(), restored)).first->second;
+	}
+
+	bool beginPersistentStatMigrationCommit(CreatureObject & creature)
+	{
+		// Persist a consumed marker before mutation. If the server stops during
+		// commit, recovery fails closed instead of replaying the service or XP.
+		return creature.setObjVarItem(cms_statMigrationObjVarState, cms_statMigrationStateCommitting);
+	}
+
+	void applyStatMigration(CreatureObject & creature, std::vector<int> const & targets)
+	{
+		for (int attribute = 0; attribute < Attributes::NumberOfAttributes; ++attribute)
+		{
+			int const oldMaximum = creature.getUnmodifiedMaxAttribute(attribute);
+			int const oldCurrent = creature.getUnmodifiedAttribute(attribute);
+			int const delta = targets[attribute] - oldMaximum;
+			creature.setMaxAttribute(attribute, targets[attribute], false);
+			creature.setAttribute(attribute, std::max(0, oldCurrent + delta));
+		}
+	}
 
 	void internalSetBoosterOnOff(NetworkId const & actor, bool onOff)
 	{
@@ -317,8 +473,6 @@ namespace CommandCppFuncsNamespace
 			NetworkId const & POBShipId,
 			GroupObject::GroupMemberParamVector & membersInsidePOB,
 			GroupObject::GroupMemberParamVector & membersOutsidePOB);
-
-		TravelPoint const * getNearestTravelPoint(std::string const & planetName, Vector const & location, std::vector<int> const & cityBanList, uint32 faction, bool starPortAndShuttleportOnly);
 	}
 
 	void triggerSpaceEjectPlayerFromShip(CreatureObject * creatureObject);
@@ -425,50 +579,6 @@ void CommandCppFuncsNamespace::triggerSpaceEjectPlayerFromShip(CreatureObject * 
 	{
 		WARNING(true, ("CommandCppFuncsNamespace::triggerSpaceEjectPlayerFromShip: nullptr ScriptObject."));
 	}
-}
-
-// ----------------------------------------------------------------------
-
-TravelPoint const * CommandCppFuncsNamespace::GroupHelpers::getNearestTravelPoint(std::string const & planetName, Vector const & location, std::vector<int> const & cityBanList, uint32 faction, bool starPortAndShuttleportOnly)
-{
-	TravelPoint const * nearestTravelPoint = nullptr;
-	PlanetObject const * const planetObject = ServerUniverse::getInstance().getPlanetByName(planetName);
-	if (planetObject)
-	{
-		int const numberOfTravelPoints = planetObject->getNumberOfTravelPoints();
-		for (int i = 0; i < numberOfTravelPoints; ++i)
-		{
-			TravelPoint const * tp = planetObject->getTravelPoint(i);
-			if (!tp)
-				continue;
-
-			if (starPortAndShuttleportOnly && ((tp->getType() & TravelPoint::TPT_PC_CampShuttleBeacon) || (tp->getType() & TravelPoint::TPT_NPC_StaticBaseBeacon)))
-				continue;
-
-			// need to check factional alignment in order to use the gcw static base travel point
-			std::string const & tpName = tp->getName();
-			if (tpName.find("gcwstaticbase") != std::string::npos)
-			{
-				if ((tpName.find("rebel") != std::string::npos) && !PvpData::isRebelFactionId(faction))
-					continue;
-				else if ((tpName.find("imperial") != std::string::npos) && !PvpData::isImperialFactionId(faction))
-					continue;
-			}
-
-			// if the travel point is inside a player city, make sure player is not banned in that city
-			if (!cityBanList.empty())
-			{
-				int const cityAtTp = CityInterface::getCityAtLocation(planetName, static_cast<int>(tp->getPosition_w().x), static_cast<int>(tp->getPosition_w().z), 0);
-				if ((cityAtTp > 0) && (std::find(cityBanList.begin(), cityBanList.end(), cityAtTp) != cityBanList.end()))
-					continue;
-			}
-
-			if (!nearestTravelPoint || (location.magnitudeBetweenSquared(tp->getPosition_w()) < location.magnitudeBetweenSquared(nearestTravelPoint->getPosition_w())))
-				nearestTravelPoint = tp;
-		}
-	}
-
-	return nearestTravelPoint;
 }
 
 // ======================================================================
@@ -4317,361 +4427,20 @@ static void commandFuncGroupMakeMasterLooter(Command const &, NetworkId const &a
 
 static void commandFuncCreateGroupPickup(Command const &, NetworkId const &actor, NetworkId const &, Unicode::String const &)
 {
-	CreatureObject * const actorObj = dynamic_cast<CreatureObject*>(ServerWorld::findObjectByNetworkId(actor));
-	if (!actorObj)
-		return;
-
-	PlayerObject * const playerObj = PlayerCreatureController::getPlayerObject(actorObj);
-	if (!playerObj)
-		return;
-
-	Client * const clientObj = actorObj->getClient();
-	if (!clientObj)
-		return;
-
-	GroupObject * const groupObj = actorObj->getGroup();
-	if (!groupObj || ((groupObj->getGroupLeaderId() != actor) && (playerObj->getSkillTemplate().find("officer_") != 0)))
-	{
-		sendProseMessage(*actorObj, 0, StringId("group", "create_group_pickup_not_group_leader"));
-		return;
-	}
-
-	Vector const currentWorldLocation = actorObj->findPosition_w();
-	std::string const currentScene = ServerWorld::getSceneId();
-	if (!GroupPickupPoint::isGroupPickupAllowedAtLocation(currentScene, static_cast<int>(currentWorldLocation.x), static_cast<int>(currentWorldLocation.z)))
-	{
-		sendProseMessage(*actorObj, 0, StringId("group", "create_group_pickup_unsupported_location"));
-		return;
-	}
-
-	if (groupObj->getSecondsLeftOnGroupPickup())
-	{
-		sendProseMessage(*actorObj, 0, StringId("group", "create_group_pickup_existing"));
-		return;
-	}
-
-	// see if there are any connected player group members within 20m to assist/approve creating the group pickup point
-	std::map<NetworkId, LfgCharacterData> const & connectedCharacterLfgData = ServerUniverse::getConnectedCharacterLfgData();
-	GroupObject::GroupMemberVector const & groupMembers = groupObj->getGroupMembers();
-	bool anyConnectedGroupMemberInRange = false;
-
-	GroupObject::GroupMemberVector::const_iterator iterGroupMember;
-	for (iterGroupMember = groupMembers.begin(); iterGroupMember != groupMembers.end(); ++iterGroupMember)
-	{
-		if ((iterGroupMember->first != actor) && groupObj->isMemberPC(iterGroupMember->first) && (connectedCharacterLfgData.count(iterGroupMember->first) > 0))
-		{
-			CreatureObject const * memberObj = dynamic_cast<CreatureObject*>(ServerWorld::findObjectByNetworkId(iterGroupMember->first));
-			if (memberObj)
-			{
-				Vector const memberWorldLocation = memberObj->findPosition_w();
-				if (static_cast<int>(currentWorldLocation.magnitudeBetweenSquared(memberWorldLocation)) <= ConfigServerGame::getGroupPickupPointApprovalRangeSquared())
-				{
-					anyConnectedGroupMemberInRange = true;
-					break;
-				}
-			}
-		}
-	}
-
-	// if there are no connected group members within 20m, bail
-	if (!anyConnectedGroupMemberInRange)
-	{
-		ProsePackage prosePackage;
-		prosePackage.stringId = StringId("group", "create_group_pickup_no_assistant");
-		prosePackage.digitInteger = static_cast<int>(sqrt(static_cast<float>(ConfigServerGame::getGroupPickupPointApprovalRangeSquared())));
-
-		Chat::sendSystemMessage(*actorObj, prosePackage);
-		return;
-	}
-
-	// tell other group members that the group leader has created the group pickup point;
-	// we need to contact all other group members, even if they are not currently connected,
-	// so that we can create the group pickup point waypoint for them when they reconnect
-	std::string const actorName = Unicode::wideToNarrow(actorObj->getAssignedObjectName());
-	for (iterGroupMember = groupMembers.begin(); iterGroupMember != groupMembers.end(); ++iterGroupMember)
-	{
-		if ((iterGroupMember->first != actor) && groupObj->isMemberPC(iterGroupMember->first))
-		{
-			char buffer[1024];
-			snprintf(buffer, sizeof(buffer) - 1, "%s|%d|%d|%d|%s", currentScene.c_str(), static_cast<int>(currentWorldLocation.x), static_cast<int>(currentWorldLocation.y), static_cast<int>(currentWorldLocation.z), actorName.c_str());
-			buffer[sizeof(buffer) - 1] = '\0';
-
-			MessageToQueue::getInstance().sendMessageToC(iterGroupMember->first,
-				"C++GroupPickupPointCreated",
-				buffer,
-				0,
-				false);
-		}
-	}
-
-	// create the group pickup point
-	time_t const timeNow = ::time(nullptr);
-	groupObj->setGroupPickupTimer(timeNow, timeNow + static_cast<time_t>(ConfigServerGame::getGroupPickupPointTimeLimitSeconds()));
-	groupObj->setGroupPickupLocation(currentScene, currentWorldLocation);
-
-	// tell group leader that the group pickup point has been created
-	StringId::LocUnicodeString response;
-	if (StringId("group", "create_group_pickup_success_leader").localize(response))
-	{
-		ConsoleMgr::broadcastString(FormattedString<2048>().sprintf(Unicode::wideToNarrow(response).c_str(), CalendarTime::convertSecondsToMS(static_cast<unsigned int>(ConfigServerGame::getGroupPickupPointTimeLimitSeconds())).c_str()),
-			clientObj);
-	}
-
-	// create/update the group leader's group pickup point waypoint
-	Location const location(currentWorldLocation, NetworkId::cms_invalid, Location::getCrcBySceneName(currentScene));
-	playerObj->createOrUpdateReusableWaypoint(location, "groupPickupWp", Unicode::narrowToWide("Group Pickup Point"), Waypoint::White);
+	// Group pickup was introduced after Publish 14.1. Keep the registered hook
+	// for packet/table compatibility, but never admit the later-era shortcut.
+	LOG("PreCuRestore", ("Ignored retired NGE createGroupPickup command from %s",
+		actor.getValueString().c_str()));
 }
 
 // ----------------------------------------------------------------------
 
-static void commandFuncUseGroupPickup(Command const &, NetworkId const &actor, NetworkId const &, Unicode::String const &params)
+static void commandFuncUseGroupPickup(Command const &, NetworkId const &actor, NetworkId const &, Unicode::String const &)
 {
-	CreatureObject * const actorObj = dynamic_cast<CreatureObject*>(ServerWorld::findObjectByNetworkId(actor));
-	if (!actorObj)
-		return;
-
-	PlayerObject const * const playerObj = PlayerCreatureController::getPlayerObject(actorObj);
-	if (!playerObj)
-		return;
-
-	Client const * const clientObj = actorObj->getClient();
-	if (!clientObj)
-		return;
-
-	GameScriptObject * const gameScriptObject = actorObj->getScriptObject();
-	if (!gameScriptObject)
-		return;
-
-	bool starPortAndShuttleportOnly = false;
-	static Unicode::String const noCampParam = Unicode::narrowToWide("nocamp");
-	if (Unicode::caseInsensitiveCompare(params, noCampParam))
-		starPortAndShuttleportOnly = true;
-
-	GroupObject * const groupObj = actorObj->getGroup();
-	if (!groupObj || (groupObj->getSecondsLeftOnGroupPickup() == 0))
-	{
-		sendProseMessage(*actorObj, 0, StringId("group", "use_group_pickup_none_active"));
-		return;
-	}
-
-	Vector const currentWorldLocation = actorObj->findPosition_w();
-	std::string const currentScene = ServerWorld::getSceneId();
-	if (!GroupPickupPoint::isGroupPickupAllowedAtLocation(currentScene, static_cast<int>(currentWorldLocation.x), static_cast<int>(currentWorldLocation.z)))
-	{
-		sendProseMessage(*actorObj, 0, StringId("group", "use_group_pickup_unsupported_location"));
-		return;
-	}
-
-	if (actorObj->getState(States::Combat))
-	{
-		sendProseMessage(*actorObj, 0, StringId("group", "use_group_pickup_in_combat"));
-		return;
-	}
-
-	if (actorObj->isIncapacitated() || actorObj->isDead())
-	{
-		sendProseMessage(*actorObj, 0, StringId("group", "use_group_pickup_dead_or_incap"));
-		return;
-	}
-
-	if (actorObj->getMountedCreature())
-	{
-		sendProseMessage(*actorObj, 0, StringId("group", "use_group_pickup_on_mount"));
-		return;
-	}
-
-	// trigger script to make sure script is ok with the player traveling to the group pickup point
-	ScriptParams sp1;
-	if (gameScriptObject->trigAllScripts(Scripting::TRIG_ABOUT_TO_TRAVEL_TO_GROUP_PICKUP_POINT, sp1) != SCRIPT_CONTINUE)
-		return;
-
-	// if group pickup point is in mustafar or any of the kashyyyk zones,
-	// check to make sure player has the required feature bits to go there
-	std::pair<std::string, Vector> const & groupPickupLocation = groupObj->getGroupPickupLocation();
-	uint32 const gameFeatureBits = clientObj->getGameFeatures();
-
-	if (groupPickupLocation.first.find("kashyyyk") == 0)
-	{
-		if (!((gameFeatureBits & ClientGameFeature::Episode3PreorderDownload) || (gameFeatureBits & ClientGameFeature::Episode3ExpansionRetail)))
-		{
-			sendProseMessage(*actorObj, 0, StringId("travel", "kashyyyk_unauthorized"));
-			return;
-		}
-	}
-	else if (groupPickupLocation.first == "mustafar")
-	{
-		if (!((gameFeatureBits & ClientGameFeature::TrialsOfObiwanPreorder) || (gameFeatureBits & ClientGameFeature::TrialsOfObiwanRetail)))
-		{
-			sendProseMessage(*actorObj, 0, StringId("travel", "mustafar_unauthorized"));
-			return;
-		}
-	}
-
-	// determine cost, and make sure player has enough credits
-	int totalCost;
-	if (!GroupPickupPoint::getGroupPickupTravelCost(currentScene, groupPickupLocation.first, totalCost) || (totalCost <= 0))
-	{
-		sendProseMessage(*actorObj, 0, StringId("group", "use_group_pickup_internal_error_cannot_determine_cost"));
-		return;
-	}
-
-	int const bankBalance = actorObj->getBankBalance();
-	int const cashBalance = actorObj->getCashBalance();
-
-	if ((bankBalance + cashBalance) < totalCost)
-	{
-		ProsePackage prosePackage;
-		prosePackage.stringId = StringId("group", "use_group_pickup_not_enough_credits");
-		prosePackage.digitInteger = totalCost;
-
-		Chat::sendSystemMessage(*actorObj, prosePackage);
-		return;
-	}
-
-	// find the travel point (starport, shuttleport, camp with shuttle beacon)
-	// nearest to the group pickup point
-
-	// get the list of cities the player is currently banned from
-	std::vector<int> cityBanList;
-	DynamicVariableList const & objvars = actorObj->getObjVars();
-	if (objvars.hasItem("city.banlist") && (objvars.getType("city.banlist") == DynamicVariable::INT_ARRAY))
-		IGNORE_RETURN(objvars.getItem("city.banlist", cityBanList));
-
-	std::string sceneIdOfNearestTravelPoint = groupPickupLocation.first;
-	TravelPoint const * nearestTravelPoint = GroupHelpers::getNearestTravelPoint(groupPickupLocation.first, groupPickupLocation.second, cityBanList, actorObj->getPvpFaction(), starPortAndShuttleportOnly);
-
-	// if no nearest travel point found, and the pickup point is inside one
-	// of the kashyyyk zones that do not have a starport, use kashyyyk_main
-	// as the pickup point planet and find the nearest travel point there,
-	// and that should return at least the kachirho starport
-	// *****OR*****
-	// if nearest travel point is found inside any kashyyyk zone other than kashyyyk_main
-	// and the player is not already in that respective zone, don't allow them to travel
-	// there as entrance to those zones requires going through kashyyyk_main first, so
-	// find the nearest travel point in kashyyyk_main and use that as the travel point
-	bool findNearestTravelPointOnKashyyykMain = false;
-	if (!nearestTravelPoint && (groupPickupLocation.first.find("kashyyyk") == 0) && (groupPickupLocation.first != "kashyyyk_main"))
-	{
-		// if already on the kashyyyk zone where the group pickup point is, player is
-		// already closest to the group pickup point than any travel point on kashyyyk_main
-		if (currentScene == groupPickupLocation.first)
-		{
-			sendProseMessage(*actorObj, 0, StringId("group", "use_group_pickup_closest_to_group_pickup_point"));
-			return;
-		}
-
-		findNearestTravelPointOnKashyyykMain = true;
-	}
-	else if (nearestTravelPoint && (groupPickupLocation.first.find("kashyyyk") == 0) && (groupPickupLocation.first != "kashyyyk_main") && (currentScene != groupPickupLocation.first))
-	{
-		findNearestTravelPointOnKashyyykMain = true;
-	}
-
-	if (findNearestTravelPointOnKashyyykMain)
-	{
-		sceneIdOfNearestTravelPoint = "kashyyyk_main";
-
-		if (groupPickupLocation.first == "kashyyyk_hunting")
-		{
-			// we want to find the travel point on kashyyyk_main nearest to the entrance to kashyyyk_hunting which is at (190.0f, 20.0f, -430.0f)
-			nearestTravelPoint = GroupHelpers::getNearestTravelPoint(sceneIdOfNearestTravelPoint, Vector(190.0f, 20.0f, -430.0f), cityBanList, actorObj->getPvpFaction(), starPortAndShuttleportOnly);
-		}
-		else if (groupPickupLocation.first == "kashyyyk_dead_forest")
-		{
-			// we want to find the travel point on kashyyyk_main nearest to the entrance to kashyyyk_dead_forest which is at (-745.0f, 18.0f, 256.0f)
-			nearestTravelPoint = GroupHelpers::getNearestTravelPoint(sceneIdOfNearestTravelPoint, Vector(-745.0f, 18.0f, 256.0f), cityBanList, actorObj->getPvpFaction(), starPortAndShuttleportOnly);
-		}
-		else
-		{
-			// (-672.0f, 19.0f, -157.0f) is the kachirho starport
-			nearestTravelPoint = GroupHelpers::getNearestTravelPoint(sceneIdOfNearestTravelPoint, Vector(-672.0f, 19.0f, -157.0f), cityBanList, actorObj->getPvpFaction(), starPortAndShuttleportOnly);
-		}
-	}
-
-	if (!nearestTravelPoint)
-	{
-		sendProseMessage(*actorObj, 0, StringId("group", "use_group_pickup_internal_error_cannot_find_travelpoint"));
-		return;
-	}
-
-	// if nearest travel point and current planet is the same, and the nearest travel point to the
-	// group pickup point is farther away than the current location to the group pickup point, then
-	// fail, as there is no need to travel as the player is currently closer to the group pickup point
-	if ((sceneIdOfNearestTravelPoint == currentScene) && (sceneIdOfNearestTravelPoint == groupPickupLocation.first) && (groupPickupLocation.second.magnitudeBetweenSquared(nearestTravelPoint->getPosition_w()) > groupPickupLocation.second.magnitudeBetweenSquared(currentWorldLocation)))
-	{
-		sendProseMessage(*actorObj, 0, StringId("group", "use_group_pickup_closest_to_group_pickup_point"));
-		return;
-	}
-
-	// if the nearest travel point is a shuttleport in a player city, the city gets a share of the travel cost
-	int cityShareOfCost = 0;
-	int systemShareOfCost = totalCost;
-	int const cityIdAtNearestTravelPoint = CityInterface::getCityAtLocation(sceneIdOfNearestTravelPoint, static_cast<int>(nearestTravelPoint->getPosition_w().x), static_cast<int>(nearestTravelPoint->getPosition_w().z), 0);
-	NetworkId cityHallAtNearestTravelPoint;
-	std::string cityNameAtNearestTravelPoint;
-	if (cityIdAtNearestTravelPoint > 0)
-	{
-		CityInfo const & ci = CityInterface::getCityInfo(cityIdAtNearestTravelPoint);
-		cityHallAtNearestTravelPoint = ci.getCityHallId();
-		if (cityHallAtNearestTravelPoint.isValid())
-		{
-			cityNameAtNearestTravelPoint = ci.getCityName();
-			cityShareOfCost = (totalCost * ConfigServerGame::getGroupPickupTravelPlayerCityPercent()) / 100;
-			systemShareOfCost = totalCost - cityShareOfCost;
-		}
-	}
-
-	// if player doesn't have enough money in bank, transfer from cash into back to make up the difference
-	if (bankBalance < totalCost)
-	{
-		if (!actorObj->depositCashToBank(totalCost - bankBalance))
-		{
-			sendProseMessage(*actorObj, 0, StringId("group", "use_group_pickup_internal_error_cannot_move_cash_to_bank"));
-			return;
-		}
-	}
-
-	// transfer the total travel cost from the player
-	if (!actorObj->transferBankCreditsTo("GroupPickupPointTravel", totalCost))
-	{
-		sendProseMessage(*actorObj, 0, StringId("group", "use_group_pickup_internal_error_cannot_transfer_payment_from_bank"));
-		return;
-	}
-
-	// tell player his credits have been deducted
-	ProsePackage prosePackage;
-	prosePackage.stringId = StringId("group", "use_group_pickup_credits_deducted");
-	prosePackage.digitInteger = totalCost;
-
-	Chat::sendSystemMessage(*actorObj, prosePackage);
-
-	// if the city gets a share of the travel cost, send message to the city hall to transfer the city's share
-	if (cityHallAtNearestTravelPoint.isValid() && (cityShareOfCost > 0))
-	{
-		char buffer[64];
-		snprintf(buffer, sizeof(buffer) - 1, "%d", cityShareOfCost);
-		buffer[sizeof(buffer) - 1] = '\0';
-
-		MessageToQueue::getInstance().sendMessageToC(cityHallAtNearestTravelPoint,
-			"C++CityShareGroupPickupPointTravelCost",
-			buffer,
-			0,
-			false);
-	}
-
-	// log the transaction
-	if (cityHallAtNearestTravelPoint.isValid())
-		LOG("CustomerService", ("GroupPickupPointTravel:%s in group %s traveled from %s to %s for a cost of %d (%d to system, %d to %s)", playerObj->getAccountDescription().c_str(), groupObj->getNetworkId().getValueString().c_str(), currentScene.c_str(), groupPickupLocation.first.c_str(), totalCost, systemShareOfCost, cityShareOfCost, cityNameAtNearestTravelPoint.c_str()));
-	else
-		LOG("CustomerService", ("GroupPickupPointTravel:%s in group %s traveled from %s to %s for a cost of %d", playerObj->getAccountDescription().c_str(), groupObj->getNetworkId().getValueString().c_str(), currentScene.c_str(), groupPickupLocation.first.c_str(), totalCost));
-
-	// trigger script to teleport player to the destination travel location;
-	// script has various "cleanup/setup" it needs to be when the player travels
-	ScriptParams sp2;
-	sp2.addParam(sceneIdOfNearestTravelPoint.c_str());
-	sp2.addParam(nearestTravelPoint->getName().c_str());
-
-	IGNORE_RETURN(gameScriptObject->trigAllScripts(Scripting::TRIG_TRAVEL_TO_GROUP_PICKUP_POINT, sp2));
+	// Travel remains ticket/starport based. This retained hook must not provide
+	// a no-ticket teleport path into ordinary or expansion worlds.
+	LOG("PreCuRestore", ("Ignored retired NGE useGroupPickup command from %s",
+		actor.getValueString().c_str()));
 }
 
 // ----------------------------------------------------------------------
@@ -5473,6 +5242,12 @@ static void commandFuncPurchaseTicket(const Command& /*command*/, const NetworkI
 	const Unicode::String travelPoint2 = Unicode::narrowToWide(underscoreToSpace(nextStringParm(parameters, pos)));
 	const bool roundTrip = nextBoolParm(parameters, pos);
 	const bool instantTravel = nextBoolParm(parameters, pos);
+	if (instantTravel)
+	{
+		LOG("PreCuRestore", ("Ignored retired NGE instant-travel ticket request from %s",
+			actor.getValueString().c_str()));
+		return;
+	}
 
 	ScriptParams scriptParameters;
 	scriptParameters.addParam(actor);
@@ -5482,9 +5257,7 @@ static void commandFuncPurchaseTicket(const Command& /*command*/, const NetworkI
 	scriptParameters.addParam(travelPoint2);
 	scriptParameters.addParam(roundTrip);
 
-	Scripting::TrigId id = instantTravel ? Scripting::TRIG_PURCHASE_TICKET_INSTANT_TRAVEL : Scripting::TRIG_PURCHASE_TICKET;
-
-	if (serverObject->getScriptObject()->trigAllScripts(id, scriptParameters) != SCRIPT_CONTINUE)
+	if (serverObject->getScriptObject()->trigAllScripts(Scripting::TRIG_PURCHASE_TICKET, scriptParameters) != SCRIPT_CONTINUE)
 		DEBUG_REPORT_LOG(true, ("commandFuncPurchaseTicket: did not return SCRIPT_CONTINUE\n"));
 }
 
@@ -6088,29 +5861,35 @@ static void commandFuncRequestCharacterSheetInfo(Command const &, NetworkId cons
 		return;
 	}
 
-	//TODO get the born and played times (once they're in the DB)
-	int born = 0;
-	int played = 0;
+	PlayerObject const * const player = PlayerCreatureController::getPlayerObject(creatureActor);
+	int const born = player ? player->getBornDate() : 0;
+	int const played = player ? static_cast<int>(player->getPlayedTime()) : 0;
 
-	//get the bind location
+	// Get the persisted bind location. Fall back to the registered facility for
+	// characters created before the location objvar was populated.
 	Vector bindLoc;
 	std::string bindPlanet;
-	NetworkId bindId;
-	if (creatureActor->getObjVars().hasItem("bind.facility"))
+	DynamicVariableLocationData bindLocation;
+	if (creatureActor->getObjVars().getItem("bind.location", bindLocation))
 	{
-		creatureActor->getObjVars().getItem("bind.facility", bindId);
+		bindLoc = bindLocation.pos;
+		bindPlanet = bindLocation.scene;
 	}
-	if (bindId != NetworkId::cms_invalid)
+	else
 	{
-		const ServerObject* const bindObject = ServerObject::getServerObject(bindId);
-		if (bindObject != nullptr)
+		NetworkId bindId;
+		if (creatureActor->getObjVars().getItem("bind.facility", bindId) && bindId != NetworkId::cms_invalid)
 		{
-			bindLoc = bindObject->getPosition_w();
-			bindPlanet = bindObject->getSceneId();
+			const ServerObject* const bindObject = ServerObject::getServerObject(bindId);
+			if (bindObject != nullptr)
+			{
+				bindLoc = bindObject->getPosition_w();
+				bindPlanet = bindObject->getSceneId();
+			}
 		}
 	}
 
-	//get the bankId
+	// banking_bankid records the last bank-terminal planet, but not coordinates.
 	Vector bankLoc(0, 0, 0);
 	std::string bankPlanet;
 	if (creatureActor->getObjVars().hasItem("banking_bankid"))
@@ -6158,7 +5937,7 @@ static void commandFuncRequestCharacterSheetInfo(Command const &, NetworkId cons
 	if (resObject != nullptr)
 	{
 		resLoc = resObject->getPosition_w();
-		resPlanet = ServerWorld::getSceneId();
+		resPlanet = resObject->getSceneId();
 	}
 	else if (houseNetworkId.isValid() && MessageToQueue::isInstalled())
 	{
@@ -6177,13 +5956,14 @@ static void commandFuncRequestCharacterSheetInfo(Command const &, NetworkId cons
 		creatureActor->getObjVars().getItem("marriage.spouseName", spouseName);
 	}
 
-	//get the number of used lots
-	int lots = creatureActor->getMaxNumberOfLots();
+	// Get the number of lots still available to this account from the same
+	// configured cap and per-account adjustment used by structure placement.
+	int lots = ConfigServerGame::getMaxLotsPerAccount();
 
-	PlayerObject const * const player = PlayerCreatureController::getPlayerObject(creatureActor);
 	if (player)
 	{
-		int lotsUsed = player->getAccountNumLots();
+		lots += player->getAccountMaxLotsAdjustment();
+		int const lotsUsed = player->getAccountNumLots();
 		lots -= lotsUsed;
 	}
 
@@ -6192,6 +5972,100 @@ static void commandFuncRequestCharacterSheetInfo(Command const &, NetworkId cons
 	Client * const client = creatureActor->getClient();
 	if (client)
 		client->send(chrm, true);
+}
+
+// ----------------------------------------------------------------------
+
+static void commandFuncRequestStatMigrationData(Command const &, NetworkId const &actor, NetworkId const &, Unicode::String const &)
+{
+	CreatureObject * const creature = CreatureObject::getCreatureObject(actor);
+	if (!creature || !creature->isAuthoritative() || !creature->getClient())
+		return;
+
+	StatMigrationSession * session = findOrLoadPersistentStatMigration(*creature);
+	if (!session)
+		session = &s_statMigrationSessions[actor];
+	if (session->targets.empty() && !initializeStatMigrationSession(*creature, *session))
+	{
+		char const * const sharedTemplateName = creature->getSharedTemplateName();
+		WARNING(true, ("Unable to initialize Publish 14 stat migration for %s (%s)",
+			actor.getValueString().c_str(), sharedTemplateName ? sharedTemplateName : "<null>"));
+		s_statMigrationSessions.erase(actor);
+		return;
+	}
+
+	StatMigrationTargetsMessage const message(session->targets, session->pointsLeft);
+	creature->getClient()->send(message, true);
+}
+
+// ----------------------------------------------------------------------
+
+static void commandFuncRequestSetStatMigrationData(Command const &, NetworkId const &actor, NetworkId const &, Unicode::String const & params)
+{
+	CreatureObject * const creature = CreatureObject::getCreatureObject(actor);
+	if (!creature || !creature->isAuthoritative() || !creature->getClient())
+		return;
+
+	size_t position = 0;
+	std::vector<int> targets;
+	targets.reserve(Attributes::NumberOfAttributes);
+	for (int attribute = 0; attribute < Attributes::NumberOfAttributes; ++attribute)
+		targets.push_back(nextIntParm(params, position));
+
+	// Publish 14 clients append pointsLeft as a tenth integer. It is advisory;
+	// the server validates all nine targets and their authoritative racial sum.
+	if (!validateStatMigrationTargets(*creature, targets))
+	{
+		WARNING(true, ("Rejected invalid Publish 14 stat migration targets for %s",
+			actor.getValueString().c_str()));
+		return;
+	}
+
+	StatMigrationSession & session = s_statMigrationSessions[actor];
+	session.targets = targets;
+	session.pointsLeft = 0;
+
+	// Fresh characters migrate immediately while either authoritative tutorial
+	// lifecycle marker is present. World allocations remain pending for an entertainer.
+	if (creature->isInTutorial())
+	{
+		applyStatMigration(*creature, targets);
+		clearPersistentStatMigration(*creature);
+		s_statMigrationSessions.erase(actor);
+	}
+	else if (!persistStatMigration(*creature, session))
+	{
+		WARNING(true, ("Unable to persist Publish 14 stat migration targets for %s",
+			actor.getValueString().c_str()));
+		s_statMigrationSessions.erase(actor);
+	}
+}
+
+// ----------------------------------------------------------------------
+
+static void commandFuncRequestStatMigrationStart(Command const &, NetworkId const &actor, NetworkId const &, Unicode::String const &)
+{
+	CreatureObject * const creature = CreatureObject::getCreatureObject(actor);
+	if (!creature || !creature->isAuthoritative())
+		return;
+
+	StatMigrationSession * session = findOrLoadPersistentStatMigration(*creature);
+	if (!session)
+		session = &s_statMigrationSessions[actor];
+	if (session->targets.empty() && !initializeStatMigrationSession(*creature, *session))
+		s_statMigrationSessions.erase(actor);
+}
+
+// ----------------------------------------------------------------------
+
+static void commandFuncRequestStatMigrationStop(Command const &, NetworkId const &actor, NetworkId const &, Unicode::String const &)
+{
+	CreatureObject * const creature = CreatureObject::getCreatureObject(actor);
+	if (!creature || !creature->isAuthoritative())
+		return;
+
+	// The Publish 14 stop command ends the active migration interaction; its
+	// validated targets remain pending for a later Image Designer commit.
 }
 
 // ----------------------------------------------------------------------
@@ -6265,6 +6139,166 @@ static void commandFuncRevokeSkill(Command const &, NetworkId const &actor, Netw
 			skillName.c_str(), creature->getNetworkId().getValueString().c_str()));
 		creature->revokeSkill(*skill);
 	}
+}
+
+// ----------------------------------------------------------------------
+
+static bool isForceSensitiveSkillBox(std::string const &skillName)
+{
+	if (skillName.find("force_sensitive_") != 0 || skillName.size() < 3)
+		return false;
+
+	std::string const suffix = skillName.substr(skillName.size() - 3);
+	return suffix == "_01" || suffix == "_02" || suffix == "_03" || suffix == "_04";
+}
+
+static int countForceSensitiveSkillBoxes(CreatureObject::SkillList const &skills)
+{
+	int count = 0;
+	for (CreatureObject::SkillList::const_iterator it = skills.begin(); it != skills.end(); ++it)
+		if (*it != nullptr && isForceSensitiveSkillBox((*it)->getSkillName()))
+			++count;
+	return count;
+}
+
+static bool isPlayerSurrenderableSkill(SkillObject const &skill)
+{
+	std::string const &skillName = skill.getSkillName();
+	if (isForceSensitiveSkillBox(skillName))
+		return true;
+
+	bool const legacyProfessionFamily =
+		skillName.find("combat_") == 0 ||
+		skillName.find("crafting_") == 0 ||
+		skillName.find("outdoors_") == 0 ||
+		skillName.find("science_") == 0 ||
+		skillName.find("social_") == 0;
+
+	if (!legacyProfessionFamily || skill.isProfession() || skill.findProfessionForSkill() == nullptr)
+		return false;
+
+	// Hybrid conversion rows are not player-facing Pre-CU skills.
+	if (skillName.find("_prereq_") != std::string::npos)
+		return false;
+
+	char const * const protectedPrefixes[] =
+	{
+		"class_",
+		"common_",
+		"demo_",
+		"expertise",
+		"force_",
+		"internal_",
+		"pilot_",
+		"social_language_",
+		"social_politician_",
+		"species_",
+		"swg_",
+		"utility_"
+	};
+
+	for (size_t i = 0; i != sizeof(protectedPrefixes) / sizeof(protectedPrefixes[0]); ++i)
+	{
+		if (skillName.find(protectedPrefixes[i]) == 0)
+			return false;
+	}
+
+	// Jedi progression has additional surrender rules that this Phase-A path
+	// intentionally does not attempt to reproduce.
+	return skillName.find("jedi") == std::string::npos;
+}
+
+static void repairExperienceCapsAfterSkillSurrender(CreatureObject &creature, PlayerObject &player)
+{
+	std::map<std::string, int> const experience = player.getExperiencePoints();
+	for (std::map<std::string, int>::const_iterator it = experience.begin(); it != experience.end(); ++it)
+	{
+		int const limit = player.getExperienceLimit(it->first);
+		if (limit >= 0 && it->second > limit)
+			IGNORE_RETURN(creature.grantExperiencePoints(it->first, limit - it->second));
+	}
+}
+
+static void commandFuncSurrenderSkill(Command const &, NetworkId const &actor, NetworkId const &, Unicode::String const &params)
+{
+	CreatureObject * const creature = CreatureObject::getCreatureObject(actor);
+	if (creature == nullptr || !creature->isAuthoritative())
+	{
+		WARNING(true, ("commandFuncSurrenderSkill: invalid or non-authoritative actor"));
+		return;
+	}
+	PlayerObject * const player = PlayerCreatureController::getPlayerObject(creature);
+	if (player == nullptr)
+	{
+		WARNING(true, ("commandFuncSurrenderSkill: actor has no PlayerObject"));
+		return;
+	}
+
+	size_t pos = 0;
+	std::string const skillName = nextStringParm(params, pos);
+	SkillObject const * const skill = SkillManager::getInstance().getSkill(skillName);
+	if (skill == nullptr || !creature->hasSkill(*skill))
+	{
+		Chat::sendSystemMessage(*creature, Unicode::narrowToWide("You do not possess that skill."), Unicode::emptyString);
+		return;
+	}
+
+	// Pilot retirement is recruiter-only.  Route a normal player's request
+	// through the retained revoke lifecycle so base_player can veto it and
+	// display the localized recruiter warning/waypoint.  Gods remain closed
+	// here so the skills-window command cannot bypass that lifecycle.
+	if (skillName.find("pilot_") == 0)
+	{
+		Client const * const client = creature->getClient();
+		if (client != nullptr && !client->isGod())
+		{
+			creature->revokeSkill(*skill);
+			return;
+		}
+	}
+
+	if (!isPlayerSurrenderableSkill(*skill))
+	{
+		Chat::sendSystemMessage(*creature, Unicode::narrowToWide("That skill cannot be surrendered through the skills window."), Unicode::emptyString);
+		return;
+	}
+
+	CreatureObject::SkillList const &ownedSkills = creature->getSkillList();
+	for (CreatureObject::SkillList::const_iterator it = ownedSkills.begin(); it != ownedSkills.end(); ++it)
+	{
+		SkillObject const * const ownedSkill = *it;
+		if (ownedSkill != nullptr && ownedSkill != skill && ownedSkill->dependsUponSkill(*skill))
+		{
+			Chat::sendSystemMessage(*creature, SharedStringIds::revoke_dependant_skill, Unicode::emptyString);
+			return;
+		}
+	}
+
+	if (isForceSensitiveSkillBox(skillName))
+	{
+		SkillObject const * const jediRank =
+			SkillManager::getInstance().getSkill("force_title_jedi_rank_02");
+		if (jediRank != nullptr && creature->hasSkill(*jediRank) &&
+			countForceSensitiveSkillBoxes(ownedSkills) <= 24)
+		{
+			Chat::sendSystemMessage(*creature,
+				StringId("jedi_spam", "revoke_force_sensitive"), Unicode::emptyString);
+			return;
+		}
+	}
+
+	creature->revokeSkill(*skill);
+	if (creature->hasSkill(*skill))
+	{
+		WARNING(true, ("commandFuncSurrenderSkill: revoke of %s from %s was vetoed or failed",
+			skillName.c_str(), actor.getValueString().c_str()));
+		Chat::sendSystemMessage(*creature, Unicode::narrowToWide("That skill could not be surrendered."), Unicode::emptyString);
+		return;
+	}
+
+	repairExperienceCapsAfterSkillSurrender(*creature, *player);
+	LOG("CustomerService", ("Skill: Player surrendered skill %s from character %s.",
+		skillName.c_str(), actor.getValueString().c_str()));
 }
 
 // ----------------------------------------------------------------------
@@ -6649,6 +6683,8 @@ static void commandFuncNpcConversationStart(Command const &, NetworkId const &ac
 	if (player == nullptr)
 	{
 		DEBUG_WARNING(true, ("commandFuncNpcConversationStart: couldn't find actor"));
+		LOG("PreCuConversation", ("command-start rejected actor=%s target=%s reason=actor-unavailable",
+			actor.getValueString().c_str(), target.getValueString().c_str()));
 		return;
 	}
 
@@ -6657,6 +6693,8 @@ static void commandFuncNpcConversationStart(Command const &, NetworkId const &ac
 	if (npc == nullptr)
 	{
 		DEBUG_WARNING(true, ("commandFuncNpcConversationStart: Couldn't find npc to converse with"));
+		LOG("PreCuConversation", ("command-start rejected actor=%s target=%s reason=target-unavailable",
+			actor.getValueString().c_str(), target.getValueString().c_str()));
 		return;
 	}
 
@@ -6666,6 +6704,8 @@ static void commandFuncNpcConversationStart(Command const &, NetworkId const &ac
 		if (!player->canManipulateObject(*npc, false, false, false, 30.0f, error))
 		{
 			DEBUG_WARNING(true, ("commandFuncNpcConversationStart (ground): failed canManipulateObject check"));
+			LOG("PreCuConversation", ("command-start rejected actor=%s target=%s reason=manipulation-check error=%d",
+				actor.getValueString().c_str(), target.getValueString().c_str(), static_cast<int>(error)));
 			return;
 		}
 	}
@@ -6674,13 +6714,20 @@ static void commandFuncNpcConversationStart(Command const &, NetworkId const &ac
 	if (realParams.size() < 2)
 	{
 		DEBUG_WARNING(true, ("commandFuncNpcConversationStart: bad params %s", realParams.c_str()));
+		LOG("PreCuConversation", ("command-start rejected actor=%s target=%s reason=bad-params length=%u",
+			actor.getValueString().c_str(), target.getValueString().c_str(), static_cast<unsigned int>(realParams.size())));
 		return;
 	}
 
 	const char * const conversationName = &realParams[2];
 	NpcConversationData::ConversationStarter const starter = static_cast<NpcConversationData::ConversationStarter>(atoi(realParams.c_str()));
 
-	player->startNpcConversation(*npc, conversationName, starter, 0);
+	bool const started = player->startNpcConversation(*npc, conversationName, starter, 0);
+	LOG("PreCuConversation", ("command-start actor=%s target=%s starter=%d result=%d",
+		actor.getValueString().c_str(),
+		target.getValueString().c_str(),
+		static_cast<int>(starter),
+		started ? 1 : 0));
 }
 
 //----------------------------------------------------------------------
@@ -9649,6 +9696,42 @@ static void commandFuncRoomPickRandomPlayer(Command const &, NetworkId const &ac
 
 // ======================================================================
 
+bool CommandCppFuncs::canCommitStatMigration(NetworkId const & actor)
+{
+	CreatureObject * const creature = CreatureObject::getCreatureObject(actor);
+	if (!creature || !creature->isAuthoritative())
+		return false;
+
+	CommandCppFuncsNamespace::StatMigrationSession const * const session =
+		CommandCppFuncsNamespace::findOrLoadPersistentStatMigration(*creature);
+	return session && session->pointsLeft == 0 &&
+		CommandCppFuncsNamespace::validateStatMigrationTargets(*creature, session->targets);
+}
+
+// ----------------------------------------------------------------------
+
+bool CommandCppFuncs::commitStatMigration(NetworkId const & actor)
+{
+	if (!canCommitStatMigration(actor))
+		return false;
+
+	CreatureObject * const creature = CreatureObject::getCreatureObject(actor);
+	CommandCppFuncsNamespace::StatMigrationSessionMap::iterator const session =
+		CommandCppFuncsNamespace::s_statMigrationSessions.find(actor);
+	if (!creature || session == CommandCppFuncsNamespace::s_statMigrationSessions.end())
+		return false;
+
+	if (!CommandCppFuncsNamespace::beginPersistentStatMigrationCommit(*creature))
+		return false;
+
+	CommandCppFuncsNamespace::applyStatMigration(*creature, session->second.targets);
+	CommandCppFuncsNamespace::clearPersistentStatMigration(*creature);
+	CommandCppFuncsNamespace::s_statMigrationSessions.erase(session);
+	return true;
+}
+
+// ----------------------------------------------------------------------
+
 void CommandCppFuncs::install()
 {
 	// console style commands
@@ -9851,11 +9934,16 @@ void CommandCppFuncs::install()
 
 	//skill
 	CommandTable::addCppFunction("revokeSkill", commandFuncRevokeSkill);
+	CommandTable::addCppFunction("surrenderSkill", commandFuncSurrenderSkill);
 	CommandTable::addCppFunction("setCurrentSkillTitle", commandFuncSetCurrentSkillTitle);
 
 	//misc ui
 	CommandTable::addCppFunction("permissionListModify", commandFuncPermissionListModify);
 	CommandTable::addCppFunction("requestCharacterSheetInfo", commandFuncRequestCharacterSheetInfo);
+	CommandTable::addCppFunction("requestSetStatMigrationData", commandFuncRequestSetStatMigrationData);
+	CommandTable::addCppFunction("requestStatMigrationData", commandFuncRequestStatMigrationData);
+	CommandTable::addCppFunction("requestStatMigrationStart", commandFuncRequestStatMigrationStart);
+	CommandTable::addCppFunction("requestStatMigrationStop", commandFuncRequestStatMigrationStop);
 	CommandTable::addCppFunction("removeBuff", commandFuncRemoveBuff);
 
 	// npc conversation

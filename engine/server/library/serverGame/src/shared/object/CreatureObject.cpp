@@ -247,7 +247,14 @@ const static std::string CREATURES_TABLE("datatables/mob/creatures.iff");
 
 namespace CreatureObjectNamespace
 {
-	const int POINTS_PER_TIER = 4;
+	bool isRetiredNgeProgressionSkillName(std::string const & skillName)
+	{
+		return skillName.find("class_") == 0 ||
+			skillName == "expertise" ||
+			skillName.find("expertise_") == 0 ||
+			skillName.find("internal_expertise_") == 0;
+	}
+
 	// ----------------------------------------------------------------------
 
 	const char* s_inventoryTemplate  = "object/tangible/inventory/character_inventory.iff";
@@ -667,6 +674,7 @@ CreatureObject::CreatureObject(const ServerCreatureObjectTemplate* newTemplate) 
 	m_regenerationTime(0),
 	m_attributes(Attributes::NumberOfAttributes),
 	m_maxAttributes(Attributes::NumberOfAttributes),
+	m_wounds(Attributes::NumberOfAttributes),
 	m_totalAttributes(Attributes::NumberOfAttributes),
 	m_totalMaxAttributes(Attributes::NumberOfAttributes),
 	m_attribBonus(Attributes::NumberOfAttributes),
@@ -785,14 +793,13 @@ CreatureObject::CreatureObject(const ServerCreatureObjectTemplate* newTemplate) 
 				newTemplate->getAttributes(static_cast<
 				ServerCreatureObjectTemplate::Attributes>(i))));
 			m_maxAttributes.set(i, m_attributes.get(i));
+			m_wounds.set(i, 0);
 			m_cachedCurrentAttributeModValues.set(i, 0);
 			m_cachedMaxAttributeModValues.set(i, 0);
 			m_regeneration[i] = 0;
 		}
-		// store the default regen values in the former faucet attrib slots
-		m_attributes.set(Attributes::Constitution, static_cast<int>(ConfigServerGame::getDefaultHealthRegen()));
-		m_attributes.set(Attributes::Stamina, static_cast<int>(ConfigServerGame::getDefaultActionRegen()));
-		m_attributes.set(Attributes::Willpower, static_cast<int>(ConfigServerGame::getDefaultMindRegen()));
+		for (int i = 0; i < 3; ++i)
+			m_regenerationOverride[i] = -1.0f;
 	}
 
 	// fix the size of the mental state vectors
@@ -1818,10 +1825,54 @@ void CreatureObject::initializeFirstTimeObject()
 
 //-----------------------------------------------------------------------
 
+void CreatureObject::migrateSixAttributeStateToNine()
+{
+	if (m_attributes.size() == Attributes::NumberOfAttributes &&
+		m_maxAttributes.size() == Attributes::NumberOfAttributes)
+		return;
+
+	if (m_attributes.size() != 6 || m_maxAttributes.size() != 6)
+	{
+		WARNING_STRICT_FATAL(true, ("Creature %s has unsupported persisted attribute vector sizes current=%u max=%u",
+			getNetworkId().getValueString().c_str(),
+			static_cast<unsigned int>(m_attributes.size()),
+			static_cast<unsigned int>(m_maxAttributes.size())));
+		return;
+	}
+
+	std::vector<Attributes::Value> const oldCurrent(m_attributes.get());
+	std::vector<Attributes::Value> const oldMax(m_maxAttributes.get());
+	std::vector<Attributes::Value> current(Attributes::NumberOfAttributes, 300);
+	std::vector<Attributes::Value> maximum(Attributes::NumberOfAttributes, 300);
+
+	current[Attributes::Health] = oldCurrent[0];
+	current[Attributes::Constitution] = oldMax[1];
+	current[Attributes::Action] = oldCurrent[2];
+	current[Attributes::Stamina] = oldMax[3];
+	current[Attributes::Mind] = oldCurrent[4];
+	current[Attributes::Willpower] = oldMax[5];
+
+	maximum[Attributes::Health] = oldMax[0];
+	maximum[Attributes::Constitution] = oldMax[1];
+	maximum[Attributes::Action] = oldMax[2];
+	maximum[Attributes::Stamina] = oldMax[3];
+	maximum[Attributes::Mind] = oldMax[4];
+	maximum[Attributes::Willpower] = oldMax[5];
+
+	m_attributes.set(current);
+	m_maxAttributes.set(maximum);
+	LOG("PreCuRestore", ("Migrated creature %s from the six-attribute layout to the Publish 14 nine-attribute layout",
+		getNetworkId().getValueString().c_str()));
+}
+
+//-----------------------------------------------------------------------
+
 void CreatureObject::onLoadedFromDatabase()
 {
 	if (isAuthoritative())
 	{
+		migrateSixAttributeStateToNine();
+
 		if (isPlayerControlled())
 		{
 			onClientAboutToLoad();
@@ -2000,11 +2051,6 @@ void CreatureObject::onLoadedFromDatabase()
 				"C++CheckCharacterTitle", "", 30, false);
 		}
 
-		// store the default regen values in the former faucet attrib slots
-		m_attributes.set(Attributes::Constitution, static_cast<int>(ConfigServerGame::getDefaultHealthRegen()));
-		m_attributes.set(Attributes::Stamina, static_cast<int>(ConfigServerGame::getDefaultActionRegen()));
-		m_attributes.set(Attributes::Willpower, static_cast<int>(ConfigServerGame::getDefaultMindRegen()));
-
 		if(!isPlayerControlled())
 			fixupPersistentBuffsAfterLoading();
 		else
@@ -2049,18 +2095,6 @@ void CreatureObject::onLoadedFromDatabase()
 
 	if (isAuthoritative() && isPlayerControlled())
 	{
-		// make sure the player has no more expertise skills than they should have for their level
-		// if they do, log them as a suspected cheater
-		int const remainingExpertisePoints = getRemainingExpertisePoints();
-
-		if (remainingExpertisePoints < 0)
-		{
-			LOG("CustomerService",
-				("SuspectedCheaterChannel: %s has more expertises than level %d allows. Amount over limit is %d.",
-				PlayerObject::getAccountDescription(this).c_str(), getLevel(), -remainingExpertisePoints)
-				);
-		}
-
 		// if we are a player, go through all the creature's equipment and update for
 		// bonus skill mods
 		std::vector<std::pair<std::string, int> > skillModBonuses;
@@ -3138,6 +3172,8 @@ Attributes::Value CreatureObject::getAdjustedAttribute(Attributes::Enumerator at
 	// modify the attribute for attrib mods
 	value = static_cast<Attributes::Value>(
 		value + m_cachedCurrentAttributeModValues[attribute]);
+	if (!Attributes::isAttribPool(attribute))
+		value = static_cast<Attributes::Value>(value - m_wounds[attribute]);
 
 	// modify for partial regeneration
 	value = static_cast<Attributes::Value>(value + static_cast<int>(floor(m_regeneration[attribute])));
@@ -3167,7 +3203,8 @@ Attributes::Value CreatureObject::getMaxAttribute(Attributes::Enumerator attribu
 
 	Attributes::Value value = getUnmodifiedMaxAttribute(attribute);
 	value = static_cast<Attributes::Value>(
-		value + m_cachedMaxAttributeModValues[attribute] + m_attribBonus[attribute]);
+		value + m_cachedMaxAttributeModValues[attribute] +
+		m_attribBonus[attribute] - m_wounds[attribute]);
 
 	if (capStat)
 	{
@@ -3634,6 +3671,13 @@ const bool CreatureObject::grantSkill(const SkillObject & newSkill)
 {
 	if(isAuthoritative())
 	{
+		if (isPlayerControlled() && isRetiredNgeProgressionSkillName(newSkill.getSkillName()))
+		{
+			LOG("PreCuRestore", ("Rejected retired NGE progression skill %s for player %s",
+				newSkill.getSkillName().c_str(), getNetworkId().getValueString().c_str()));
+			return false;
+		}
+
 		//-- jww: simply return true if the skill is already in the vector
 		//--      this was the previous behavior, dunno if it should return false
 		if (hasSkill (newSkill))
@@ -3968,14 +4012,6 @@ int CreatureObject::alterAttribute(Attributes::Enumerator attrib, int delta,
 			return 0;
 		}
 
-		if (!Attributes::isAttribPool(attrib))
-		{
-			// we only alter pool values now, regeneration is set directly
-			DEBUG_REPORT_LOG(true, ("CreatureObject::alterAttribute called on %s for non-pool attrib (%d)\n",
-				getNetworkId().getValueString().c_str(), attrib));
-			return 0;
-		}
-
 		if (delta == 0)
 			return 0;
 
@@ -4109,21 +4145,25 @@ void CreatureObject::testIncapacitation(const NetworkId & attackerId)
 	if (m_deferComputeTotalAttributes <= 0)
 	{
 		int const health = getAttribute(Attributes::Health);
+		int const action = getAttribute(Attributes::Action);
+		int const mind = getAttribute(Attributes::Mind);
+		bool const anyPrimaryPoolEmpty = health <= 0 || action <= 0 || mind <= 0;
+		bool const allPrimaryPoolsPositive = health > 0 && action > 0 && mind > 0;
 
 		if (!isIncapacitated())
 		{
 			// see if we are incapacitated
 
-			if (health <= 0)
+			if (anyPrimaryPoolEmpty)
 			{
 				setIncapacitated(true, attackerId);
 			}
 		}
 		else
 		{
-			// recapacitate if any attribute is above 0
+			// recapacitate only after all three primary pools recover
 
-			if (health > 0)
+			if (allPrimaryPoolsPositive)
 			{
 				setIncapacitated(false, attackerId);
 			}
@@ -4243,6 +4283,7 @@ static char internalTagBuf[] = {'_','_','i','n','t','e','r','n','a','l','T','a',
 static const int internalTagBufLen = strlen(internalTagBuf);
 
 	int damage = 0;
+	bool appliedWound = false;
 
 	if (isAuthoritative())
 	{
@@ -4296,6 +4337,15 @@ static const int internalTagBufLen = strlen(internalTagBuf);
 				newMod.maxVal = 0;
 				newMod.currentVal = 0;
 				newMod.mod = mod;
+				if (AttribMod::isAttribMod(mod) && mod.decay == AttribMod::AMDS_wound)
+				{
+					newMod.maxVal = mod.value;
+					if (!Attributes::isAttribPool(mod.attrib) ||
+						(mod.flags & AttribMod::AMF_attackCurrent))
+					{
+						newMod.currentVal = mod.value;
+					}
+				}
 				if (newMod.mod.tag == 0)
 				{
 					// we need to have some sort of tag, so we use an internal
@@ -4313,6 +4363,7 @@ static const int internalTagBufLen = strlen(internalTagBuf);
 							insertResult = m_attributeModList.insert(newMod.mod.tag, newMod);
 						}
 					} while (!insertResult.second);
+					appliedWound = newMod.mod.decay == AttribMod::AMDS_wound;
 
 					// clear any flags that assume we have a valid tag.
 					if (newMod.mod.flags & AttribMod::AMF_triggerOnDone)
@@ -4334,7 +4385,10 @@ static const int internalTagBufLen = strlen(internalTagBuf);
 				}
 				else
 				{
-					m_attributeModList.insert(mod.tag, newMod);
+					std::pair<Archive::AutoDeltaMap<uint32, CreatureMod>::const_iterator, bool> const insertResult =
+						m_attributeModList.insert(mod.tag, newMod);
+					appliedWound = insertResult.second &&
+						newMod.mod.decay == AttribMod::AMDS_wound;
 				}
 
 				if ((mod.flags & AttribMod::AMF_visible) && isPlayerControlled())
@@ -4365,6 +4419,11 @@ static const int internalTagBufLen = strlen(internalTagBuf);
 		}
 
 		--m_deferComputeTotalAttributes;
+		if (appliedWound)
+		{
+			recomputeAttribModTotals(true);
+			computeTotalAttributes();
+		}
 	}
 	else
 	{
@@ -4792,7 +4851,7 @@ void CreatureObject::applyDamage(const CombatEngineData::DamageData &damageData)
 		(healthDamage > 0 || actionDamage > 0 || mindDamage > 0))
 	{
 		NOT_NULL(getScriptObject());
-		int damageArray[] = {healthDamage, 0, actionDamage, 0, mindDamage, 0};
+		int damageArray[] = {healthDamage, 0, 0, actionDamage, 0, 0, mindDamage, 0, 0};
 		std::vector<int> damageParam(&damageArray[0], &damageArray[Attributes::NumberOfAttributes]);
 
 		ScriptParams params;
@@ -4999,6 +5058,12 @@ void CreatureObject::decayAttributes(float time)
 		if (m.mod.sustain == -1.0f)
 		{
 			// mod never expires
+			decayBegin = -1.0f;
+			totalTime = -1.0f;
+		}
+		else if (m.mod.decay == AttribMod::AMDS_wound)
+		{
+			// Wounds persist until an explicit medical or entertainer heal.
 			decayBegin = -1.0f;
 			totalTime = -1.0f;
 		}
@@ -5577,36 +5642,6 @@ void CreatureObject::setGroup(GroupObject *group, bool disbandingCurrentGroup)
 				ServerUniverse::setConnectedCharacterGroupData(getNetworkId(), m_group.get());
 		}
 
-		// if joining a group, and the group currently
-		// has an active group pickup point, handle it
-		if (group && (oldGroupId != group->getNetworkId()))
-		{
-			unsigned int const secondsLeftOnGroupPickup = group->getSecondsLeftOnGroupPickup();
-			if (secondsLeftOnGroupPickup)
-			{
-				std::pair<std::string, Vector> const & groupPickupLocation = group->getGroupPickupLocation();
-				if (!groupPickupLocation.first.empty())
-				{
-					// tell group member that there's an active group pickup point
-					if (getClient())
-					{
-						StringId::LocUnicodeString response;
-						if (StringId("group", "create_group_pickup_success_new_group_member").localize(response))
-						{
-							ConsoleMgr::broadcastString(FormattedString<2048>().sprintf(Unicode::wideToNarrow(response).c_str(), CalendarTime::convertSecondsToMS(secondsLeftOnGroupPickup).c_str()),
-								getClient());
-						}
-					}
-
-					// create/update the group member's group pickup point waypoint
-					if (playerObject)
-					{
-						Location const location(groupPickupLocation.second, NetworkId::cms_invalid, Location::getCrcBySceneName(groupPickupLocation.first));
-						playerObject->createOrUpdateReusableWaypoint(location, "groupPickupWp", Unicode::narrowToWide("Group Pickup Point"), Waypoint::White);
-					}
-				}
-			}
-		}
 	}
 	else
 	{
@@ -6688,12 +6723,6 @@ void CreatureObject::setAttribute(Attributes::Enumerator attribute, Attributes::
 			DEBUG_REPORT_LOG(true, ("attribute out of range (%d)\n", attribute));
 			return;
 		}
-		if (!Attributes::isAttribPool(attribute))
-		{
-			DEBUG_WARNING(true, ("CreatureObject::setAttribute called with non-pool attribute %d on creature %s. If this is a regeneration value, call setRegenRate() instead.",
-				attribute, getNetworkId().getValueString().c_str()));
-			return;
-		}
 		const Attributes::Value currentValue = m_attributes[attribute];
 		IGNORE_RETURN(alterAttribute(attribute, value - currentValue, true));
 	}
@@ -6714,12 +6743,6 @@ void CreatureObject::setMaxAttribute(Attributes::Enumerator attribute, Attribute
 		if (attribute < 0 || attribute >= Attributes::NumberOfAttributes)
 		{
 			DEBUG_REPORT_LOG(true, ("attribute out of range (%d)\n", attribute));
-			return;
-		}
-		if (!Attributes::isAttribPool(attribute))
-		{
-			DEBUG_WARNING(true, ("CreatureObject::setMaxAttribute called with non-pool attribute %d on creature %s. If this is a regeneration value, call setRegenRate() instead.",
-				attribute, getNetworkId().getValueString().c_str()));
 			return;
 		}
 		m_maxAttributes.set(attribute, value);
@@ -7300,10 +7323,10 @@ int i;
 		for (i = 0; i < Attributes::NumberOfAttributes; ++i)
 		{
 			if (Attributes::isAttribPool(i))
-			{
 				m_totalAttributes.set(i, getAttribute(i) - static_cast<int>(floor(m_regeneration[i])));
-				m_totalMaxAttributes.set(i, getMaxAttribute(i));
-			}
+			else
+				m_totalAttributes.set(i, getAttribute(i));
+			m_totalMaxAttributes.set(i, getMaxAttribute(i));
 		}
 	}
 }	// CreatureObject::computeTotalAttributes
@@ -7363,6 +7386,29 @@ bool CreatureObject::drainAttributes(Attributes::Value action, Attributes::Value
 	}
 	return true;
 }	// CreatureObject::drainAttributes
+
+//----------------------------------------------------------------------
+
+bool CreatureObject::drainCombatAttributes(Attributes::Value health, Attributes::Value action, Attributes::Value mind)
+{
+	Attributes::Value const costs[3] = {health, action, mind};
+
+	for (int i = 0; i < 3; ++i)
+	{
+		if (costs[i] < 0)
+			return false;
+		if (costs[i] > 0 && getAttribute(Attributes::POOLS[i]) <= costs[i])
+			return false;
+	}
+
+	for (int i = 0; i < 3; ++i)
+	{
+		if (costs[i] > 0)
+			alterAttribute(Attributes::POOLS[i], -costs[i], false, NetworkId::cms_invalid, true);
+	}
+
+	return true;
+}
 
 //----------------------------------------------------------------------
 
@@ -7610,9 +7656,39 @@ void CreatureObject::onClientReady(Client *c)
 void CreatureObject::onClientAboutToLoad()
 {
 	if (isAuthoritative())
+	{
+		clearRetiredNgeProgressionSkills();
 		setInvulnerabilityTimer(ConfigServerGame::getCreatureLoadInvulnerableTimeWithoutClient());
+	}
 
 	TangibleObject::onClientAboutToLoad();
+}
+
+// ----------------------------------------------------------------------
+
+void CreatureObject::clearRetiredNgeProgressionSkills()
+{
+	if (!isAuthoritative() || !isPlayerControlled())
+		return;
+
+	std::vector<SkillObject const *> skillsToRetire;
+	for (SkillList::const_iterator iter = m_skills.begin(); iter != m_skills.end(); ++iter)
+	{
+		SkillObject const * const skill = *iter;
+		if (skill && CreatureObjectNamespace::isRetiredNgeProgressionSkillName(skill->getSkillName()))
+			skillsToRetire.push_back(skill);
+	}
+
+	for (std::vector<SkillObject const *>::const_iterator iter = skillsToRetire.begin(); iter != skillsToRetire.end(); ++iter)
+		m_skills.erase(*iter);
+
+	if (!skillsToRetire.empty())
+	{
+		// onLoadedFromDatabase calls this before setupSkillData(), which then
+		// rebuilds commands, modifiers, schematics, and level from this clean set.
+		LOG("PreCuRestore", ("Retired %u persisted NGE progression skill(s) while loading player %s",
+			static_cast<unsigned int>(skillsToRetire.size()), getNetworkId().getValueString().c_str()));
+	}
 }
 
 // ----------------------------------------------------------------------
@@ -8196,6 +8272,67 @@ static const StringId SHOCK_WOUND_ID("cbt_spam", "shock_wound");
 	{
 		sendControllerMessageToAuthServer(CM_setShockWounds, new MessageQueueGenericValueType<int>(wound));
 	}
+}
+
+//----------------------------------------------------------------------
+
+int CreatureObject::getWoundAmount(Attributes::Enumerator attribute) const
+{
+	if (attribute < 0 || attribute >= Attributes::NumberOfAttributes)
+		return 0;
+	return m_wounds[attribute];
+}
+
+//----------------------------------------------------------------------
+
+int CreatureObject::addWound(Attributes::Enumerator attribute, int value)
+{
+	if (!isAuthoritative() ||
+		attribute < 0 || attribute >= Attributes::NumberOfAttributes ||
+		value <= 0 || isDead() || TangibleObject::isInvulnerable())
+	{
+		return 0;
+	}
+
+	int const woundLimit = getUnmodifiedMaxAttribute(attribute) - 1;
+	int const woundRoom = woundLimit - getWoundAmount(attribute);
+	int const applied = value < woundRoom ? value : woundRoom;
+	if (applied <= 0)
+		return 0;
+
+	m_wounds.set(attribute, static_cast<Attributes::Value>(
+		getWoundAmount(attribute) + applied));
+	if (Attributes::isAttribPool(attribute))
+	{
+		int const current = getUnmodifiedAttribute(attribute) +
+			m_cachedCurrentAttributeModValues[attribute];
+		int const woundedMax = getMaxAttribute(attribute);
+		if (current > woundedMax)
+			IGNORE_RETURN(alterAttribute(attribute, woundedMax - current, true));
+	}
+	computeTotalAttributes();
+	return applied;
+}
+
+//----------------------------------------------------------------------
+
+int CreatureObject::healWound(Attributes::Enumerator attribute, int value)
+{
+	if (!isAuthoritative() ||
+		attribute < 0 || attribute >= Attributes::NumberOfAttributes ||
+		value <= 0)
+	{
+		return 0;
+	}
+
+	int const wound = getWoundAmount(attribute);
+	int const healed = value < wound ? value : wound;
+	if (healed > 0)
+	{
+		m_wounds.set(attribute, static_cast<Attributes::Value>(wound - healed));
+		computeTotalAttributes();
+	}
+	return healed;
 }
 
 //----------------------------------------------------------------------
@@ -10399,39 +10536,8 @@ void CreatureObject::handleCMessageTo(MessageToPayload const &message)
 	}
 	else if (message.getMethod() == "C++GroupPickupPointCreated")
 	{
-		if (!message.getPackedDataVector().empty())
-		{
-			std::string const params(message.getPackedDataVector().begin(), message.getPackedDataVector().end());
-
-			Unicode::String const delimiters(Unicode::narrowToWide("|"));
-			Unicode::UnicodeStringVector tokens;
-			if ((Unicode::tokenize(Unicode::narrowToWide(params), tokens, &delimiters, nullptr)) && (tokens.size() == 5))
-			{
-				// tell group member that the group pickup point has been created
-				if (getClient())
-				{
-					StringId::LocUnicodeString response;
-					if (StringId("group", "create_group_pickup_success_others").localize(response))
-					{
-						ConsoleMgr::broadcastString(FormattedString<2048>().sprintf(Unicode::wideToNarrow(response).c_str(), Unicode::wideToNarrow(tokens[4]).c_str(), CalendarTime::convertSecondsToMS(static_cast<unsigned int>(ConfigServerGame::getGroupPickupPointTimeLimitSeconds())).c_str()),
-							getClient());
-					}
-				}
-
-				// create/update the group member's group pickup point waypoint
-				PlayerObject * const playerObject = PlayerCreatureController::getPlayerObject(this);
-				if (playerObject)
-				{
-					std::string const planetName = Unicode::wideToNarrow(tokens[0]);
-					int const x = atoi(Unicode::wideToNarrow(tokens[1]).c_str());
-					int const y = atoi(Unicode::wideToNarrow(tokens[2]).c_str());
-					int const z = atoi(Unicode::wideToNarrow(tokens[3]).c_str());
-
-					Location const location(Vector(static_cast<real>(x), static_cast<real>(y), static_cast<real>(z)), NetworkId::cms_invalid, Location::getCrcBySceneName(planetName));
-					playerObject->createOrUpdateReusableWaypoint(location, "groupPickupWp", Unicode::narrowToWide("Group Pickup Point"), Waypoint::White);
-				}
-			}
-		}
+		LOG("PreCuRestore", ("Ignored retired NGE group-pickup waypoint message for %s",
+			getNetworkId().getValueString().c_str()));
 	}
 	else if (message.getMethod() == "C++OccupyUnlockedSlotRsp")
 	{
@@ -12893,6 +12999,7 @@ void CreatureObject::handleTutorialTransition()
 			// let the npe phase determine whether or not to do the tutorial
 			startTutorial = (NewbieTutorial::shouldStartTutorial(this));
 		}
+		bool const startSkippedTutorial = NewbieTutorial::shouldStartSkippedTutorial(this);
 
 		const std::string currentScene = ServerWorld::getSceneId();
 		if (NewbieTutorial::isInTutorialArea(this))
@@ -12907,44 +13014,61 @@ void CreatureObject::handleTutorialTransition()
 			}
 		}
 
-		if (startTutorial && currentScene == NewbieTutorial::getSceneId())
+		if ((startTutorial || startSkippedTutorial) && currentScene == NewbieTutorial::getSceneId())
 		{
 			// if we are in the tutorial scene, force a teleportFixup here so we can determine if we are in a container
 			handleTeleportFixup(false);
 
 			ServerObject const * container = safe_cast<ServerObject const *>(ContainerInterface::getContainedByObject(*this));
 
-			// if they are on the tutorial planet, but not in a valid container, create a tutorial instance for them
+			// If they are on the tutorial planet but not in a valid container,
+			// place them in either their private full tutorial or the shared
+			// skipped-tutorial hall.
 			if (!container || !container->isAuthoritative() || isFromLogin)
 			{
-				// the player should be in the tutorial and is in the right place, go ahead and place them
-				NewbieTutorial::setupCharacterForTutorial(this);
-				Vector newLocation = getPosition_w();
-				if (newLocation == Vector(0,0,0))
+				Vector newLocation;
+				ServerObject *tutorial = 0;
+				std::string startCellName;
+				Vector startCoords;
+
+				if (startSkippedTutorial)
 				{
-					LOG("npe", ("handleTutorialTransition setup tutorial at the origin for object %s\n", getNetworkId().getValueString().c_str()));
+					newLocation = NewbieTutorial::getSkippedTutorialLocation();
+					tutorial = NewbieTutorial::getOrCreateSkippedTutorial();
+					startCellName = NewbieTutorial::getSkippedTutorialStartCellName();
+					startCoords = NewbieTutorial::getSkippedTutorialStartCoords();
 				}
-				ServerObject *tutorial = NewbieTutorial::createTutorial(newLocation);
+				else
+				{
+					NewbieTutorial::setupCharacterForTutorial(this);
+					newLocation = getPosition_w();
+					if (newLocation == Vector(0,0,0))
+					{
+						LOG("npe", ("handleTutorialTransition setup tutorial at the origin for object %s\n", getNetworkId().getValueString().c_str()));
+					}
+					tutorial = NewbieTutorial::createTutorial(newLocation);
+					startCellName = NewbieTutorial::getStartCellName();
+					startCoords = NewbieTutorial::getStartCoords();
+				}
 
-				FATAL(!tutorial, ("failed to create tutorial for player which already exists."));
-				std::string startCellName = NewbieTutorial::getStartCellName();
-
-				Vector startCoords = NewbieTutorial::getStartCoords();
+				FATAL(!tutorial, ("failed to create tutorial building for player."));
 				LOG("npe", ("handleTutorialTransition created newbie tutorial %s (%s authoritative) for %s (%s authoritative)\n", tutorial->getNetworkId().getValueString().c_str(), (tutorial->isAuthoritative()) ? "is" : "not", getNetworkId().getValueString().c_str(), (isAuthoritative()) ? "is" : "not"));
 
 				teleportObject(newLocation, tutorial->getNetworkId(), startCellName, startCoords, "", true);
 			}
 		}
 		else if (
-				(startTutorial && isFromLogin)
-			)
+				((startTutorial || startSkippedTutorial) && isFromLogin) &&
+				!(startSkippedTutorial && currentScene != NewbieTutorial::getSceneId() && getObjVars().hasItem("newbie.startingLocationTransferPending")))
 		{
 			// if the creature object is coming from login, and they should start the tutorial
 			// or if the player is on a free trial account, but is on a non-free trial planet or location (NOT GOOD!)
 			// warp them to the tutorial planet
 			LOG("npe", ("Warping player (%s) back to tutorial because they are coming from login (%i) or because they are on a free trial account (%i) and trying to get to a non-free trial planet (%s: %f %f %f)\n", getNetworkId().getValueString().c_str(), isFromLogin, (getClient() && getClient()->isFreeTrialAccount()), ServerWorld::getSceneId().c_str(), getPosition_w().x, getPosition_w().y, getPosition_w().z));
-			NewbieTutorial::setupCharacterForTutorial(this);
-			GameServer::getInstance().requestSceneWarp(CachedNetworkId(*this), NewbieTutorial::getSceneId(), NewbieTutorial::getTutorialLocation(), NetworkId::cms_invalid, Vector(0,0,0));
+			Vector const destination = startSkippedTutorial ? NewbieTutorial::getSkippedTutorialLocation() : NewbieTutorial::getTutorialLocation();
+			if (!startSkippedTutorial)
+				NewbieTutorial::setupCharacterForTutorial(this);
+			GameServer::getInstance().requestSceneWarp(CachedNetworkId(*this), NewbieTutorial::getSceneId(), destination, NetworkId::cms_invalid, Vector(0,0,0));
 		}
 	}
 }
@@ -14208,9 +14332,26 @@ float CreatureObject::getRegenRate(Attributes::Enumerator poolAttrib) const
 	if (!Attributes::isAttribPool(poolAttrib))
 		return 0;
 
-	// we've stored the rate as an int, convert back to float
-	int fixedFloatRate = m_attributes[poolAttrib+1];
-	return static_cast<float>(fixedFloatRate);
+	int poolIndex = 0;
+	Attributes::Enumerator governingAttribute = Attributes::Constitution;
+	if (poolAttrib == Attributes::Action)
+	{
+		poolIndex = 1;
+		governingAttribute = Attributes::Stamina;
+	}
+	else if (poolAttrib == Attributes::Mind)
+	{
+		poolIndex = 2;
+		governingAttribute = Attributes::Willpower;
+	}
+
+	if (m_regenerationOverride[poolIndex] >= 0.0f)
+		return m_regenerationOverride[poolIndex];
+
+	// Core3 commit 6856f315a80b5250635b2272695caec1d64204ed:
+	// each primary pool regenerates from the third attribute in its HAM group.
+	float const rate = static_cast<float>(std::max(0, getAttribute(governingAttribute))) * 13.0f / 2100.0f;
+	return std::max(1.0f, rate);
 }
 
 // ----------------------------------------------------------------------
@@ -14223,8 +14364,12 @@ void CreatureObject::setRegenRate(Attributes::Enumerator poolAttrib, float value
 			value = 0;
 		if (isAuthoritative())
 		{
-			// store the value as an int
-			m_attributes.set(poolAttrib+1, static_cast<int>(floor(value)));
+			int poolIndex = 0;
+			if (poolAttrib == Attributes::Action)
+				poolIndex = 1;
+			else if (poolAttrib == Attributes::Mind)
+				poolIndex = 2;
+			m_regenerationOverride[poolIndex] = value;
 		}
 		else
 		{
@@ -14521,79 +14666,20 @@ int CreatureObject::getExpertisePointsSpentForPlayerInTree(int tree)
 
 int CreatureObject::getRemainingExpertisePoints() const
 {
-	int const numPointsAvail = ExpertiseManager::getExpertisePointsForLevel(getLevel());
-
-	CreatureObject::SkillList expertiseList;
-	getExpertisesForPlayer(expertiseList);
-	int const numPointsUsed = expertiseList.size() - 1; // subtract 1 for skill "expertise"
-
-	return numPointsAvail - numPointsUsed;
+	// Publish 14.1 has no expertise point pool and combat level must never
+	// create one through this retained compatibility accessor.
+	return 0;
 }
 
 //-----------------------------------------------------------------------
 
 bool CreatureObject::processExpertiseRequest(std::vector<std::string> const &addExpertisesNamesList, bool clearAllExpertisesFirst)
 {
-	
-	// if you are in god mode, grant the expertise without permission checks
-	if(getClient()->isGod()) {
-		for(std::vector<std::string>::const_iterator i = addExpertisesNamesList.begin(); i != addExpertisesNamesList.end(); ++i) {
-			std::string const &s = *i;
-			const SkillObject *skill = SkillManager::getInstance().getSkill(s);
-			grantSkill(*skill);
-			Chat::sendSystemMessage(*this, Unicode::narrowToWide(FormattedString<256>().sprintf("GOD MODE: Granting you expertise skill %s without regard for points, requisites, or permissions, because you are in God Mode.", skill->getSkillName().c_str())), Unicode::emptyString);
-		}
-		return true;
-	}
-	
-	for(std::vector<std::string>::const_iterator i = addExpertisesNamesList.begin(); i != addExpertisesNamesList.end(); ++i)
-	{
-		std::string const &s = *i;
-		const SkillObject *skill = SkillManager::getInstance().getSkill(s);
-		if(skill)
-		{
-			//Check prerequisites
-			SkillObject::SkillVector const prereqs = skill->getPrerequisiteSkills();
-			for (SkillObject::SkillVector::const_iterator i = prereqs.begin(); i != prereqs.end(); ++i)
-			{
-				SkillObject const * prereq = (*i);
-				if (!prereq || !hasSkill(*prereq))
-				{
-					DEBUG_WARNING(true, ("player %s tried to get expertise %s but doesn't have expertise %s", getNetworkId().getValueString().c_str(),
-						skill->getSkillName().c_str(), prereq->getSkillName().c_str()));
-					return false;
-				}
-			}
-			//Check tier points
-			//Check if the player has enough points for a skill of this tier
-			int tree = ExpertiseManager::getExpertiseTree(s);
-			int pointsInTree = getExpertisePointsSpentForPlayerInTree(tree);
-			int tier = ExpertiseManager::getExpertiseTier(s);
-			if (pointsInTree < (tier - 1) * POINTS_PER_TIER)
-			{
-				DEBUG_WARNING(true, ("player %s tried to get expertise %s but only has %d points in tree %d, needs %d", getNetworkId().getValueString().c_str(),
-					s.c_str(), pointsInTree, tree, (tier - 1) * POINTS_PER_TIER
-					));
-				return false;
-			}
-
-			if (getRemainingExpertisePoints() < 1)
-			{
-				LOG("CustomerService", 
-					("SuspectedCheaterChannel: %s attempted to gain more expertise than allowed.",
-					PlayerObject::getAccountDescription(this).c_str())
-					);
-
-				return false;
-			}
-
-			//Check faction column
-
-			//Grant skill
-			grantSkill(*skill);
-		}
-	}
-	return true;
+	UNREF(addExpertisesNamesList);
+	UNREF(clearAllExpertisesFirst);
+	LOG("PreCuRestore", ("Rejected retired NGE expertise request for player %s",
+		getNetworkId().getValueString().c_str()));
+	return false;
 }
 
 //-----------------------------------------------------------------------

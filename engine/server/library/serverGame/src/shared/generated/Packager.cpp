@@ -113,6 +113,7 @@ void CreatureObject::addMembersToPackages()
 	addServerVariable    (m_baseRunSpeed);
 	addServerVariable    (m_baseWalkSpeed);
 	addServerVariable    (m_persistedBuffs);
+	addServerVariable    (m_wounds);
 	addServerVariable    (m_wsX);
 	addServerVariable    (m_wsY);
 	addServerVariable    (m_wsZ);

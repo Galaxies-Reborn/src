@@ -4671,6 +4671,16 @@ void GameServer::handleCharacterCreateNameVerification(const VerifyNameResponse 
 
 	DEBUG_REPORT_LOG(true, ("VerifyNameResponse: character create name %s approved for stationId %lu\n", Unicode::wideToNarrow(vrn.getName()).c_str(), vrn.getStationId()));
 
+	if (!PlayerCreationManagerServer::isValidStartingProfession(createMessage->getProfession()))
+	{
+		LOG("TraceCharacterCreation", ("%d rejected invalid Pre-CU starting profession [%s] for character %s", vrn.getStationId(), createMessage->getProfession().c_str(), Unicode::wideToNarrow(vrn.getName()).c_str()));
+		GameCreateCharacterFailed const characterCreateFailed(vrn.getStationId(), vrn.getName(), NameErrors::nameDeclinedInternalError, FormattedString<2048>().sprintf("%lu rejected invalid Pre-CU starting profession [%s] for character %s", vrn.getStationId(), createMessage->getProfession().c_str(), Unicode::wideToNarrow(vrn.getName()).c_str()));
+		sendToCentralServer(characterCreateFailed);
+		m_charactersPendingCreation->erase(vrn.getStationId());
+		delete createMessage;
+		return;
+	}
+
 	TangibleObject *newCharacterObject = 0;
 
 	if (createMessage->getUseNewbieTutorial())
@@ -4682,7 +4692,7 @@ void GameServer::handleCharacterCreateNameVerification(const VerifyNameResponse 
 	else
 	{
 		Transform tr;
-		tr.setPosition_p(createMessage->getCoordinates());
+		tr.setPosition_p(NewbieTutorial::getSkippedTutorialLocation());
 		newCharacterObject = safe_cast<TangibleObject *>(ServerWorld::createNewObject(templateName, tr, 0, false));
 	}
 
@@ -4755,18 +4765,6 @@ void GameServer::handleCharacterCreateNameVerification(const VerifyNameResponse 
 		}
 	}
 
-	if (!createMessage->getProfession ().empty ())
-	{
-		CreatureObject * const creature = dynamic_cast<CreatureObject *>(newCharacterObject);
-		if (creature)
-			PlayerCreationManagerServer::setupPlayer (*creature, createMessage->getProfession (), createMessage->getStationId(), createMessage->getJedi());
-	}
-
-	if (!createMessage->getBiography().empty())
-	{
-		BiographyManager::setBiography(newCharacterObject->getNetworkId(),createMessage->getBiography());
-	}
-
 	// ----------------------------------------------------------------------
 	// Set up the PlayerObject
 	ServerObject *playerServerObject = ServerWorld::createNewObject(ConfigServerGame::getPlayerObjectTemplate(), *newCharacterObject, false);
@@ -4775,8 +4773,22 @@ void GameServer::handleCharacterCreateNameVerification(const VerifyNameResponse 
 	{
 		play->setStationId(createMessage->getStationId());
 		play->setBornDate();
-		play->setSkillTemplate(createMessage->getSkillTemplate(), true);
-		play->setWorkingSkill(createMessage->getWorkingSkill(), true);
+		// Publish 14.1 creation does not use the later roadmap template fields.
+		// Never persist NGE defaults supplied by the retained client message.
+		play->setSkillTemplate(std::string(), true);
+		play->setWorkingSkill(std::string(), true);
+
+		if (!creature || !PlayerCreationManagerServer::setupPlayer(*creature, createMessage->getProfession(), createMessage->getStationId(), createMessage->getJedi(), createMessage->getUseNewbieTutorial()))
+		{
+			LOG("TraceCharacterCreation", ("%d failed Pre-CU profession setup [%s] for character %s", vrn.getStationId(), createMessage->getProfession().c_str(), Unicode::wideToNarrow(vrn.getName()).c_str()));
+			ServerWorld::removeObjectFromGame(*newCharacterObject);
+			delete newCharacterObject;
+			GameCreateCharacterFailed const characterCreateFailed(vrn.getStationId(), vrn.getName(), NameErrors::nameDeclinedInternalError, FormattedString<2048>().sprintf("%lu failed Pre-CU profession setup [%s] for character %s", vrn.getStationId(), createMessage->getProfession().c_str(), Unicode::wideToNarrow(vrn.getName()).c_str()));
+			sendToCentralServer(characterCreateFailed);
+			m_charactersPendingCreation->erase(vrn.getStationId());
+			delete createMessage;
+			return;
+		}
 
 		// Setup initial A-Tab inventory.
 		SlottedContainer * const container = ContainerInterface::getSlottedContainer(*newCharacterObject);
@@ -4806,10 +4818,24 @@ void GameServer::handleCharacterCreateNameVerification(const VerifyNameResponse 
 	else
 	{
 		LOG("TraceCharacterCreation", ("%d unable to create player object for new character %s", vrn.getStationId(), newCharacterObject->getNetworkId().getValueString().c_str()));
-		WARNING_STRICT_FATAL(true,("Unable to create PlayerObject for new character %s.\n",newCharacterObject->getNetworkId().getValueString().c_str()));
+		ServerWorld::removeObjectFromGame(*newCharacterObject);
+		delete newCharacterObject;
+		GameCreateCharacterFailed const characterCreateFailed(vrn.getStationId(), vrn.getName(), NameErrors::nameDeclinedInternalError, FormattedString<2048>().sprintf("%lu unable to create PlayerObject for Pre-CU character %s", vrn.getStationId(), Unicode::wideToNarrow(vrn.getName()).c_str()));
+		sendToCentralServer(characterCreateFailed);
+		m_charactersPendingCreation->erase(vrn.getStationId());
+		delete createMessage;
+		return;
 	}
 
-	newCharacterObject->setSceneIdOnThisAndContents(createMessage->getPlanetName());
+	if (!createMessage->getBiography().empty())
+	{
+		BiographyManager::setBiography(newCharacterObject->getNetworkId(),createMessage->getBiography());
+	}
+
+	// Both Publish 14 onboarding paths begin on the tutorial scene.  The
+	// unchecked path enters the shared skipped hall and chooses a world start
+	// through AvLoc2 instead of trusting the later creation-message location.
+	newCharacterObject->setSceneIdOnThisAndContents(NewbieTutorial::getSceneId());
 
 	// ----------------------------------------------------------------------
 	// Tell DB Process we're about to send it a character, then send it

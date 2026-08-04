@@ -44,6 +44,8 @@ namespace ScriptMethodsAttributesNamespace
 	jint         JNICALL getMaxAttrib(JNIEnv *env, jobject self, jlong target, jint attrib);
 	jint         JNICALL getWoundedMaxAttrib(JNIEnv *env, jobject self, jlong target, jint attrib);
 	jint         JNICALL getUnmodifiedMaxAttrib(JNIEnv *env, jobject self, jlong target, jint attrib);
+	jint         JNICALL addWound(JNIEnv *env, jobject self, jlong target, jint attrib, jint value);
+	jint         JNICALL healWound(JNIEnv *env, jobject self, jlong target, jint attrib, jint value);
 	jboolean     JNICALL setAttrib(JNIEnv *env, jobject self, jlong target, jint attrib, jint value);
 	jboolean     JNICALL setMaxAttrib(JNIEnv *env, jobject self, jlong target, jint attrib, jint value);
 	jboolean     JNICALL addToAttrib(JNIEnv *env, jobject self, jlong target, jint attrib, jint value);
@@ -76,6 +78,7 @@ namespace ScriptMethodsAttributesNamespace
 	jboolean     JNICALL addShockWound(JNIEnv *env, jobject self, jlong target, jint wound);
 	jboolean     JNICALL healShockWound(JNIEnv *env, jobject self, jlong target, jint value);
 	jboolean     JNICALL drainAttributes(JNIEnv *env, jobject self, jlong target, jint action, jint mind);
+	jboolean     JNICALL drainCombatAttributes(JNIEnv *env, jobject self, jlong target, jint health, jint action, jint mind);
 	jint         JNICALL testDrainAttribute(JNIEnv *env, jobject self, jlong target, jint attribute, jint value);
 	jboolean     JNICALL addBuffIcon(JNIEnv *env, jobject self, jlong target, jstring modName, jfloat time);
 	jboolean     JNICALL clearBuffIcon(JNIEnv *env, jobject self, jlong target, jstring modName);
@@ -97,6 +100,8 @@ const JNINativeMethod NATIVES[] = {
 	JF("_getMaxAttrib", "(JI)I", getMaxAttrib),
 	JF("_getWoundedMaxAttrib", "(JI)I", getWoundedMaxAttrib),
 	JF("_getUnmodifiedMaxAttrib", "(JI)I", getUnmodifiedMaxAttrib),
+	JF("_addWound", "(JII)I", addWound),
+	JF("_healWound", "(JII)I", healWound),
 	JF("_setAttrib", "(JII)Z", setAttrib),
 	JF("_setMaxAttrib", "(JII)Z", setMaxAttrib),
 	JF("_addToAttrib", "(JII)Z", addToAttrib),
@@ -129,6 +134,7 @@ const JNINativeMethod NATIVES[] = {
 	JF("_addShockWound", "(JI)Z", addShockWound),
 	JF("_healShockWound", "(JI)Z", healShockWound),
 	JF("_drainAttributes", "(JII)Z", drainAttributes),
+	JF("_drainCombatAttributes", "(JIII)Z", drainCombatAttributes),
 	JF("_testDrainAttribute", "(JII)I", testDrainAttribute),
 	JF("_addBuffIcon", "(JLjava/lang/String;F)Z", addBuffIcon),
 	JF("_clearBuffIcon", "(JLjava/lang/String;)Z", clearBuffIcon),
@@ -295,7 +301,8 @@ jint JNICALL ScriptMethodsAttributesNamespace::getMaxAttrib(JNIEnv *env, jobject
 	if (!JavaLibrary::getObject(target, creature))
 		return ATTRIB_ERROR;
 
-	return creature->getMaxAttribute(static_cast<Attributes::Enumerator>(attrib));
+	Attributes::Enumerator const attribute = static_cast<Attributes::Enumerator>(attrib);
+	return creature->getMaxAttribute(attribute) + creature->getWoundAmount(attribute);
 }	// JavaLibrary::getMaxAttrib
 
 /**
@@ -345,6 +352,44 @@ jint JNICALL ScriptMethodsAttributesNamespace::getUnmodifiedMaxAttrib(JNIEnv *en
 
 	return creature->getUnmodifiedMaxAttribute(static_cast<Attributes::Enumerator>(attrib));
 }	// JavaLibrary::getUnmodifiedMaxAttrib
+
+/**
+ * Applies persistent wound damage to one attribute.
+ *
+ * @return the wound amount actually applied, or ATTRIB_ERROR on invalid input
+ */
+jint JNICALL ScriptMethodsAttributesNamespace::addWound(JNIEnv *env, jobject self, jlong target, jint attrib, jint value)
+{
+	UNREF(self);
+
+	if (attrib < 0 || attrib >= Attributes::NumberOfAttributes || value < 0)
+		return ATTRIB_ERROR;
+
+	CreatureObject * creature = 0;
+	if (!JavaLibrary::getObject(target, creature))
+		return ATTRIB_ERROR;
+
+	return creature->addWound(static_cast<Attributes::Enumerator>(attrib), value);
+}	// JavaLibrary::addWound
+
+/**
+ * Heals persistent wound damage from one attribute.
+ *
+ * @return the wound amount actually healed, or ATTRIB_ERROR on invalid input
+ */
+jint JNICALL ScriptMethodsAttributesNamespace::healWound(JNIEnv *env, jobject self, jlong target, jint attrib, jint value)
+{
+	UNREF(self);
+
+	if (attrib < 0 || attrib >= Attributes::NumberOfAttributes || value < 0)
+		return ATTRIB_ERROR;
+
+	CreatureObject * creature = 0;
+	if (!JavaLibrary::getObject(target, creature))
+		return ATTRIB_ERROR;
+
+	return creature->healWound(static_cast<Attributes::Enumerator>(attrib), value);
+}	// JavaLibrary::healWound
 
 /**
  * Sets a creatue's attribute.
@@ -1372,6 +1417,21 @@ jboolean JNICALL ScriptMethodsAttributesNamespace::drainAttributes(JNIEnv *env, 
 		return JNI_TRUE;
 	return JNI_FALSE;
 }	// JavaLibrary::drainAttributes
+
+jboolean JNICALL ScriptMethodsAttributesNamespace::drainCombatAttributes(JNIEnv *env, jobject self, jlong target, jint health, jint action, jint mind)
+{
+	UNREF(self);
+
+	CreatureObject * creature = 0;
+	if (!JavaLibrary::getObject(target, creature))
+		return JNI_FALSE;
+
+	bool const result = creature->drainCombatAttributes(
+		static_cast<Attributes::Value>(health),
+		static_cast<Attributes::Value>(action),
+		static_cast<Attributes::Value>(mind));
+	return result ? JNI_TRUE : JNI_FALSE;
+}
 
 /**
  * Tests draining an attribute, but does not actually modify the attrib.

@@ -116,7 +116,11 @@ void ImageDesignChangeMessage::pack(MessageQueue::Data const * const data, Archi
 		Archive::put(target, msg->getNewHairAsset());
 		Archive::put(target, msg->getHairCustomizationData());
 		Archive::put(target, msg->getDesignType());
-		Archive::put(target, msg->getStartingTime());
+		// The original client and game server are 32-bit.  Keep the Publish 14
+		// controller-message wire field explicitly 32-bit so x64 builds remain
+		// compatible with the retail-era stream layout.
+		int const startingTimeWire = static_cast<int>(msg->getStartingTime());
+		Archive::put(target, startingTimeWire);
 		Archive::put(target, msg->getDesignerRequiredCredits());
 		Archive::put(target, msg->getRecipientPaidCredits());
 		Archive::put(target, msg->getAccepted());
@@ -157,7 +161,7 @@ MessageQueue::Data* ImageDesignChangeMessage::unpack(Archive::ReadIterator & sou
 	bool tempBool = false;
 	std::string tempStr;
 	int tempInt = 0;
-	uint32_t tempTime = 0;
+	int tempTimeWire = 0;
 
 	Archive::get(source, tempId);
 	msg->setDesignerId(tempId);
@@ -174,8 +178,8 @@ MessageQueue::Data* ImageDesignChangeMessage::unpack(Archive::ReadIterator & sou
 	Archive::get(source, tempInt);
 	DesignType const designType = static_cast<DesignType>(tempInt);
 	msg->setDesignType(designType);
-	Archive::get(source, tempTime);
-	msg->setStartingTime(tempTime);
+	Archive::get(source, tempTimeWire);
+	msg->setStartingTime(static_cast<time_t>(tempTimeWire));
 	Archive::get(source, tempInt);
 	msg->setDesignerRequiredCredits(tempInt);
 	Archive::get(source, tempInt);

@@ -111,6 +111,7 @@ namespace ScriptMethodsPvpNamespace
 	void         JNICALL pvpModifyCurrentGcwPoints(JNIEnv *env, jobject self, jlong target, jint adjustment);
 	void         JNICALL pvpModifyCurrentPvpKills(JNIEnv *env, jobject self, jlong target, jint adjustment);
 	jint         JNICALL pvpGetCurrentGcwRank(JNIEnv *env, jobject self, jlong target);
+	jboolean     JNICALL pvpSetPrecuFactionRank(JNIEnv *env, jobject self, jlong target, jint rank);
 	jint         JNICALL pvpGetMaxGcwImperialRank(JNIEnv *env, jobject self, jlong target);
 	jint         JNICALL pvpGetMaxGcwRebelRank(JNIEnv *env, jobject self, jlong target);
 	jint         JNICALL pvpGetCurrentGcwPoints(JNIEnv *env, jobject self, jlong target);
@@ -202,6 +203,7 @@ const JNINativeMethod NATIVES[] = {
 	JF("_pvpModifyCurrentGcwPoints", "(JI)V", pvpModifyCurrentGcwPoints),
 	JF("_pvpModifyCurrentPvpKills", "(JI)V", pvpModifyCurrentPvpKills),
 	JF("_pvpGetCurrentGcwRank", "(J)I", pvpGetCurrentGcwRank),
+	JF("_pvpSetPrecuFactionRank", "(JI)Z", pvpSetPrecuFactionRank),
 	JF("_pvpGetMaxGcwImperialRank", "(J)I", pvpGetMaxGcwImperialRank),
 	JF("_pvpGetMaxGcwRebelRank", "(J)I", pvpGetMaxGcwRebelRank),
 	JF("_pvpGetCurrentGcwPoints", "(J)I", pvpGetCurrentGcwPoints),
@@ -1511,11 +1513,20 @@ jint JNICALL ScriptMethodsPvpNamespace::pvpGetCurrentGcwRank(JNIEnv *env, jobjec
 	if (!JavaLibrary::getObject(target, creature))
 		return 0;
 
-	PlayerObject * player = PlayerCreatureController::getPlayerObject(creature);
-	if (!player)
-		return 0;
+	return static_cast<jint>(creature->getPrecuFactionRank());
+}
 
-	return player->getCurrentGcwRank();
+// ----------------------------------------------------------------------
+
+jboolean JNICALL ScriptMethodsPvpNamespace::pvpSetPrecuFactionRank(JNIEnv *env, jobject self, jlong target, jint rank)
+{
+	UNREF(self);
+
+	CreatureObject * creature = 0;
+	if (!JavaLibrary::getObject(target, creature))
+		return JNI_FALSE;
+
+	return creature->setPrecuFactionRank(static_cast<int>(rank)) ? JNI_TRUE : JNI_FALSE;
 }
 
 // ----------------------------------------------------------------------

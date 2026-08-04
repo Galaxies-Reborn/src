@@ -99,6 +99,7 @@ private:
 	uint32 getCurSyncStamp   () const;
 	void updateMovementType  (float time);
 	void handleObjectMenuRequest(MessageQueueObjectMenuRequest const *msg);
+	void sendEmptyObjectMenuResponse(MessageQueueObjectMenuRequest const *msg);
 	void playerMovedAndNeedsToCancelWarmup( CreatureObject &owner );
 
 	static PlayerObject * getPlayerObjectInternal(CreatureObject const * creature);

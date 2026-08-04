@@ -46,6 +46,7 @@ public:
 
 	static bool onSuccessfulAttack(const TangibleObject & attacker, TangibleObject & defender, const WeaponObject & weapon, int damage, int hitLocation);
 	static bool onSuccessfulAttack(const TangibleObject & attacker, TangibleObject & defender, int damage, int hitLocation);
+	static bool onSuccessfulAttack(const TangibleObject & attacker, TangibleObject & defender, int damage, int hitLocation, Attributes::Enumerator targetPool);
 	static bool damage(TangibleObject & defender, const WeaponObject & weapon, int damageAmount, int hitLocation);
 	static void damage(TangibleObject & defender, ServerWeaponObjectTemplate::DamageType damageType, uint16 hitLocation, int damage);
 	static void damage(const Vector &center, float radius, ServerWeaponObjectTemplate::DamageType damageType, int damage);
@@ -59,6 +60,9 @@ private:
 	static void computeCreatureDamage(
 		const ConfigCombatEngineData::BodyAttackMod *hitLocation,
 		int damage, DamageList & damageList);
+	static void computeCreatureDamage(
+		const ConfigCombatEngineData::BodyAttackMod *hitLocation,
+		int damage, Attributes::Enumerator targetPool, DamageList & damageList);
 	static void computeObjectDamage(
 		const ConfigCombatEngineData::BodyAttackMod *hitLocation,
 		int damage, DamageList & damageList);

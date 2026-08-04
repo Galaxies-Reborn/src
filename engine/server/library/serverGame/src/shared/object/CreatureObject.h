@@ -225,9 +225,13 @@ public:
 	void                resetAttribute           (Attributes::Enumerator attrib, Attributes::Value);
 	void                initializeAttribute      (Attributes::Enumerator attrib, Attributes::Value);
 	bool                drainAttributes          (Attributes::Value action, Attributes::Value mind);
+	bool                drainCombatAttributes    (Attributes::Value health, Attributes::Value action, Attributes::Value mind);
 	int                 testDrainAttribute       (Attributes::Enumerator attribute, Attributes::Value value) const;
 	int                 getShockWounds           () const;
 	void                setShockWounds           (int wound);
+	int                 getWoundAmount           (Attributes::Enumerator attribute) const;
+	int                 addWound                 (Attributes::Enumerator attribute, int value);
+	int                 healWound                (Attributes::Enumerator attribute, int value);
 	void                setAttribute             (Attributes::Enumerator attribute, Attributes::Value value);
 	virtual void        getAttributes            (std::vector<std::pair<std::string, Unicode::String> > &data) const;
 	void                sendTimedModData         (uint32 id, float time, bool updateCache = true);
@@ -624,6 +628,8 @@ public:
 	void recalculateLevel();
 	void fixupPersistentBuffsAfterLoading();
 	void fixupLevelXpAfterLoading();
+	int  getPrecuFactionRank() const;
+	bool setPrecuFactionRank(int rank);
 
 	void doWarmupChecks(
 		const Command &command,
@@ -751,6 +757,7 @@ private:
 	void     addPackedAppearanceWearable(std::string const &appearanceData, int arrangementIndex, NetworkId const &networkId, uint32 sharedTemplateCrcValue);	
 	void     packWearables();
 	void     computeTotalAttributes ();
+	void     migrateSixAttributeStateToNine();
 
 	bool     potentiallyAddToTerrain();
 
@@ -822,6 +829,7 @@ private:
 	void getExpertisesForPlayer(SkillList & expertiseList) const;
 	int getExpertiseRankForPlayer(std::string const & expertiseName);
 	int getRemainingExpertisePoints() const;
+	void clearRetiredNgeProgressionSkills();
 
 	mutable CommandQueue * m_commandQueue;
 	Archive::AutoDeltaVariable<bool>                 m_isStatic;
@@ -832,10 +840,12 @@ private:
 
 	float                                            m_regeneration[Attributes::NumberOfAttributes];   ///< Accumulated regeneration points
 	float                                            m_regenerationTime;                               ///< Accumulated regeneration time
+	float                                            m_regenerationOverride[3];                        ///< Explicit script overrides by primary pool; negative selects the Publish 14 stat formula.
 	
 	// BPM CreatureObject : TangibleObject // Begin persisted members.
 	Archive::AutoDeltaVector<Attributes::Value>      m_attributes;           ///< The current attributes (health, action, mind) of the mobile.
 	Archive::AutoDeltaVector<Attributes::Value>      m_maxAttributes;        ///< The max unaffected attributes of this mobile.
+	Archive::AutoDeltaVector<Attributes::Value>      m_wounds;               ///< Persistent Publish 14 wound amount for each attribute.
 	Archive::AutoDeltaVector<Attributes::Value>      m_totalAttributes;      ///< The current attributes, with all mods applied
 	Archive::AutoDeltaVector<Attributes::Value>      m_totalMaxAttributes;   ///< The max attributes, with all mods applied
 	Archive::AutoDeltaVector<Attributes::Value>      m_attribBonus;          ///< Bonus from items that are added to the max attrib values
@@ -1334,6 +1344,20 @@ inline int16  CreatureObject::getLevel() const
 inline int  CreatureObject::getLevelXp() const
 {
 	return m_totalLevelXp.get();
+}
+
+inline int CreatureObject::getPrecuFactionRank() const
+{
+	return static_cast<int>(m_rank.get());
+}
+
+inline bool CreatureObject::setPrecuFactionRank(int rank)
+{
+	if (!isAuthoritative() || rank < 0 || rank > 15)
+		return false;
+
+	m_rank = static_cast<uint8>(rank);
+	return true;
 }
 
 inline float CreatureObject::getPseudoPlayedTime() const
