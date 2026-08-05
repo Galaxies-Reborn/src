@@ -7423,6 +7423,8 @@ void PlayerObject::retirePostNgeGcwRatingState()
 	m_maxGcwImperialRank = 0;
 	m_maxGcwRebelRank = 0;
 	m_gcwRatingActualCalcTime = 0;
+	removeObjVarItem("gcwContributionTracking");
+	removeObjVarItem("gcwContributionTrackingLastUpdated");
 }
 
 // ----------------------------------------------------------------------

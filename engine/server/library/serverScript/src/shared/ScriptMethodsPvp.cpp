@@ -1802,65 +1802,12 @@ jobject JNICALL ScriptMethodsPvpNamespace::getGcwFactionalPresenceTableDictionar
 
 jobject JNICALL ScriptMethodsPvpNamespace::getGcwContributionTrackingTableDictionary(JNIEnv * env, jobject self, jlong player)
 {
+	// Publish 14 has no later 30-day regional GCW point-contribution ledger.
+	// Preserve the JNI entrypoint for retained scripts, but expose no stale data.
+	UNREF(env);
 	UNREF(self);
-
-	CreatureObject const * creatureObj = 0;
-	if (!JavaLibrary::getObject(player, creatureObj))
-		return 0;
-
-	PlayerObject const * const playerObj = PlayerCreatureController::getPlayerObject(creatureObj);
-	if (!playerObj)
-		return 0;
-
-	DynamicVariableList::NestedList const gcwContribution(playerObj->getObjVars(), "gcwContributionTracking");
-	int const size = gcwContribution.getCount();
-	if (size <= 0)
-		return 0;
-
-	std::vector<const char *> * scriptParamsRegion = new std::vector<const char *>;
-	std::vector<const char *> * scriptParamsTime = new std::vector<const char *>;
-	scriptParamsRegion->reserve(size);
-	scriptParamsTime->reserve(size);
-
-	char buffer[128];
-	int timeLastContributed = 0;
-	for (DynamicVariableList::NestedList::const_iterator i = gcwContribution.begin(); i != gcwContribution.end(); ++i)
-	{
-		if (Pvp::getGcwScoreCategory(i.getName()) && i.getValue(timeLastContributed))
-		{
-			snprintf(buffer, sizeof(buffer)-1, "@gcw_regions:%s", i.getName().c_str());
-			buffer[sizeof(buffer)-1] = '\0';
-
-			scriptParamsRegion->push_back(makeCopyOfString(buffer));
-			scriptParamsTime->push_back(makeCopyOfString(CalendarTime::convertEpochToTimeStringLocal_YYYYMMDDHHMMSS(static_cast<time_t>(timeLastContributed)).c_str()));
-		}
-	}
-
-	// column header
-	static const char * s_scriptParamsColumnHeadersText[2] = 
-	{
-		"GCW Region/Category",
-		"Time Of Last Contribution"
-	};
-	static std::vector<const char *> s_scriptParamsColumnHeaders(s_scriptParamsColumnHeadersText, s_scriptParamsColumnHeadersText + (sizeof(s_scriptParamsColumnHeadersText) / sizeof(const char *)));
-
-	// column type
-	static const char * s_scriptParamsColumnTypeText[2] = 
-	{
-		"text",
-		"text"
-	};
-	static std::vector<const char *> s_scriptParamsColumnType(s_scriptParamsColumnTypeText, s_scriptParamsColumnTypeText + (sizeof(s_scriptParamsColumnTypeText) / sizeof(const char *)));
-
-	ScriptParams sp;
-	sp.addParam(s_scriptParamsColumnHeaders, "column", false);
-	sp.addParam(s_scriptParamsColumnType, "columnType", false);
-	sp.addParam(*scriptParamsRegion, "column0", true);
-	sp.addParam(*scriptParamsTime, "column1", true);
-
-	JavaDictionaryPtr dictionary;
-	JavaLibrary::instance()->convert(sp, dictionary);
-	return dictionary->getReturnValue();
+	UNREF(player);
+	return 0;
 }
 
 //-----------------------------------------------------------------------
