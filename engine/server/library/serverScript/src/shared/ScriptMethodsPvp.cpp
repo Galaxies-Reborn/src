@@ -1859,106 +1859,20 @@ jobjectArray JNICALL ScriptMethodsPvpNamespace::getGcwDefenderRegions(JNIEnv * /
 
 jobjectArray JNICALL ScriptMethodsPvpNamespace::getGcwDefenderRegionsCitiesImperial(JNIEnv *env, jobject self)
 {
-	// walk the list twice, this method shouldn't get called
-	// very often as the result is cached in script
-	std::map<std::string, Pvp::GcwScoreCategory const *> const & allGcwScoreCategory = Pvp::getAllGcwScoreCategory(); 
-	std::map<std::string, Pvp::GcwScoreCategory const *>::const_iterator iter;
-	int count = 0;
-	for (iter = allGcwScoreCategory.begin(); iter != allGcwScoreCategory.end(); ++iter)
-	{
-		if (iter->second->gcwRegionDefender)
-			++count;
-	}
-
-	if (count <= 0)
-		return 0;
-
-	LocalObjectArrayRefPtr valueArray = createNewObjectArray(count, JavaLibrary::getClsString());
-	std::map<std::pair<std::string, int>, uint32> const & gcwRegionDefenderCities = CityInterface::getGcwRegionDefenderCities();
-	count = 0;
-	for (iter = allGcwScoreCategory.begin(); iter != allGcwScoreCategory.end(); ++iter)
-	{
-		if (iter->second->gcwRegionDefender)
-		{
-			std::string cities;
-			int numberOfCities = 0;
-
-			for (std::map<std::pair<std::string, int>, uint32>::const_iterator iterCity = gcwRegionDefenderCities.lower_bound(std::make_pair(iter->first, 0)); ((iterCity != gcwRegionDefenderCities.end()) && (iterCity->first.first == iter->first)); ++iterCity)
-			{
-				if (PvpData::isImperialFactionId(iterCity->second))
-				{
-					if (!cities.empty())
-						cities += ", ";
-
-					cities += CityInterface::getCityInfo(iterCity->first.second).getCityName();
-					++numberOfCities;
-				}
-			}
-
-			if ((numberOfCities > 0) && !cities.empty())
-				cities = std::string(FormattedString<32>().sprintf("%02d - ", numberOfCities)) + cities;
-
-			JavaString jval(cities);
-			setObjectArrayElement(*valueArray, count++, jval);
-		}
-	}
-
-	return valueArray->getReturnValue();
+	UNREF(env);
+	UNREF(self);
+	return 0;
 }
 
 //-----------------------------------------------------------------------
-
 jobjectArray JNICALL ScriptMethodsPvpNamespace::getGcwDefenderRegionsCitiesRebel(JNIEnv *env, jobject self)
 {
-	// walk the list twice, this method shouldn't get called
-	// very often as the result is cached in script
-	std::map<std::string, Pvp::GcwScoreCategory const *> const & allGcwScoreCategory = Pvp::getAllGcwScoreCategory(); 
-	std::map<std::string, Pvp::GcwScoreCategory const *>::const_iterator iter;
-	int count = 0;
-	for (iter = allGcwScoreCategory.begin(); iter != allGcwScoreCategory.end(); ++iter)
-	{
-		if (iter->second->gcwRegionDefender)
-			++count;
-	}
-
-	if (count <= 0)
-		return 0;
-
-	LocalObjectArrayRefPtr valueArray = createNewObjectArray(count, JavaLibrary::getClsString());
-	std::map<std::pair<std::string, int>, uint32> const & gcwRegionDefenderCities = CityInterface::getGcwRegionDefenderCities();
-	count = 0;
-	for (iter = allGcwScoreCategory.begin(); iter != allGcwScoreCategory.end(); ++iter)
-	{
-		if (iter->second->gcwRegionDefender)
-		{
-			std::string cities;
-			int numberOfCities = 0;
-
-			for (std::map<std::pair<std::string, int>, uint32>::const_iterator iterCity = gcwRegionDefenderCities.lower_bound(std::make_pair(iter->first, 0)); ((iterCity != gcwRegionDefenderCities.end()) && (iterCity->first.first == iter->first)); ++iterCity)
-			{
-				if (PvpData::isRebelFactionId(iterCity->second))
-				{
-					if (!cities.empty())
-						cities += ", ";
-
-					cities += CityInterface::getCityInfo(iterCity->first.second).getCityName();
-					++numberOfCities;
-				}
-			}
-
-			if ((numberOfCities > 0) && !cities.empty())
-				cities = std::string(FormattedString<32>().sprintf("%02d - ", numberOfCities)) + cities;
-
-			JavaString jval(cities);
-			setObjectArrayElement(*valueArray, count++, jval);
-		}
-	}
-
-	return valueArray->getReturnValue();
+	UNREF(env);
+	UNREF(self);
+	return 0;
 }
 
 //-----------------------------------------------------------------------
-
 jint JNICALL ScriptMethodsPvpNamespace::getGcwDefenderRegionsCitiesVersion(JNIEnv *env, jobject self)
 {
 	return CityInterface::getGcwRegionDefenderCitiesVersion();
@@ -1968,112 +1882,20 @@ jint JNICALL ScriptMethodsPvpNamespace::getGcwDefenderRegionsCitiesVersion(JNIEn
 
 jobjectArray JNICALL ScriptMethodsPvpNamespace::getGcwDefenderRegionsGuildsImperial(JNIEnv *env, jobject self)
 {
-	// walk the list twice, this method shouldn't get called
-	// very often as the result is cached in script
-	std::map<std::string, Pvp::GcwScoreCategory const *> const & allGcwScoreCategory = Pvp::getAllGcwScoreCategory(); 
-	std::map<std::string, Pvp::GcwScoreCategory const *>::const_iterator iter;
-	int count = 0;
-	for (iter = allGcwScoreCategory.begin(); iter != allGcwScoreCategory.end(); ++iter)
-	{
-		if (iter->second->gcwRegionDefender)
-			++count;
-	}
-
-	if (count <= 0)
-		return 0;
-
-	LocalObjectArrayRefPtr valueArray = createNewObjectArray(count, JavaLibrary::getClsString());
-	std::map<std::pair<std::string, int>, uint32> const & gcwRegionDefenderGuilds = GuildInterface::getGcwRegionDefenderGuilds();
-	count = 0;
-	for (iter = allGcwScoreCategory.begin(); iter != allGcwScoreCategory.end(); ++iter)
-	{
-		if (iter->second->gcwRegionDefender)
-		{
-			std::string guilds;
-			int numberOfGuilds = 0;
-
-			for (std::map<std::pair<std::string, int>, uint32>::const_iterator iterGuild = gcwRegionDefenderGuilds.lower_bound(std::make_pair(iter->first, 0)); ((iterGuild != gcwRegionDefenderGuilds.end()) && (iterGuild->first.first == iter->first)); ++iterGuild)
-			{
-				if (PvpData::isImperialFactionId(iterGuild->second))
-				{
-					if (!guilds.empty())
-						guilds += ", ";
-
-					guilds += GuildInterface::getGuildName(iterGuild->first.second);
-					guilds += " (";
-					guilds += GuildInterface::getGuildAbbrev(iterGuild->first.second);
-					guilds += ")";
-					++numberOfGuilds;
-				}
-			}
-
-			if ((numberOfGuilds > 0) && !guilds.empty())
-				guilds = std::string(FormattedString<32>().sprintf("%02d - ", numberOfGuilds)) + guilds;
-
-			JavaString jval(guilds);
-			setObjectArrayElement(*valueArray, count++, jval);
-		}
-	}
-
-	return valueArray->getReturnValue();
+	UNREF(env);
+	UNREF(self);
+	return 0;
 }
 
 //-----------------------------------------------------------------------
-
 jobjectArray JNICALL ScriptMethodsPvpNamespace::getGcwDefenderRegionsGuildsRebel(JNIEnv *env, jobject self)
 {
-	// walk the list twice, this method shouldn't get called
-	// very often as the result is cached in script
-	std::map<std::string, Pvp::GcwScoreCategory const *> const & allGcwScoreCategory = Pvp::getAllGcwScoreCategory(); 
-	std::map<std::string, Pvp::GcwScoreCategory const *>::const_iterator iter;
-	int count = 0;
-	for (iter = allGcwScoreCategory.begin(); iter != allGcwScoreCategory.end(); ++iter)
-	{
-		if (iter->second->gcwRegionDefender)
-			++count;
-	}
-
-	if (count <= 0)
-		return 0;
-
-	LocalObjectArrayRefPtr valueArray = createNewObjectArray(count, JavaLibrary::getClsString());
-	std::map<std::pair<std::string, int>, uint32> const & gcwRegionDefenderGuilds = GuildInterface::getGcwRegionDefenderGuilds();
-	count = 0;
-	for (iter = allGcwScoreCategory.begin(); iter != allGcwScoreCategory.end(); ++iter)
-	{
-		if (iter->second->gcwRegionDefender)
-		{
-			std::string guilds;
-			int numberOfGuilds = 0;
-
-			for (std::map<std::pair<std::string, int>, uint32>::const_iterator iterGuild = gcwRegionDefenderGuilds.lower_bound(std::make_pair(iter->first, 0)); ((iterGuild != gcwRegionDefenderGuilds.end()) && (iterGuild->first.first == iter->first)); ++iterGuild)
-			{
-				if (PvpData::isRebelFactionId(iterGuild->second))
-				{
-					if (!guilds.empty())
-						guilds += ", ";
-
-					guilds += GuildInterface::getGuildName(iterGuild->first.second);
-					guilds += " (";
-					guilds += GuildInterface::getGuildAbbrev(iterGuild->first.second);
-					guilds += ")";
-					++numberOfGuilds;
-				}
-			}
-
-			if ((numberOfGuilds > 0) && !guilds.empty())
-				guilds = std::string(FormattedString<32>().sprintf("%02d - ", numberOfGuilds)) + guilds;
-
-			JavaString jval(guilds);
-			setObjectArrayElement(*valueArray, count++, jval);
-		}
-	}
-
-	return valueArray->getReturnValue();
+	UNREF(env);
+	UNREF(self);
+	return 0;
 }
 
 //-----------------------------------------------------------------------
-
 jint JNICALL ScriptMethodsPvpNamespace::getGcwDefenderRegionsGuildsVersion(JNIEnv *env, jobject self)
 {
 	return GuildInterface::getGcwRegionDefenderGuildsVersion();
@@ -2083,104 +1905,40 @@ jint JNICALL ScriptMethodsPvpNamespace::getGcwDefenderRegionsGuildsVersion(JNIEn
 
 jintArray JNICALL ScriptMethodsPvpNamespace::getGcwDefenderRegionCitiesImperial(JNIEnv *env, jobject self, jstring gcwCategory)
 {
-	JavaStringParam localGcwCategory(gcwCategory);
-	std::string gcwCategoryString;
-	if (!JavaLibrary::convert(localGcwCategory, gcwCategoryString))
-		return 0;
-
-	std::vector<int> cityIds;
-	std::map<std::pair<std::string, int>, uint32> const & gcwRegionDefenderCities = CityInterface::getGcwRegionDefenderCities();
-	for (std::map<std::pair<std::string, int>, uint32>::const_iterator iterCity = gcwRegionDefenderCities.lower_bound(std::make_pair(gcwCategoryString, 0)); ((iterCity != gcwRegionDefenderCities.end()) && (iterCity->first.first == gcwCategoryString)); ++iterCity)
-	{
-		if (PvpData::isImperialFactionId(iterCity->second))
-			cityIds.push_back(iterCity->first.second);
-	}
-
-	if (cityIds.empty())
-		return 0;
-
-	LocalIntArrayRefPtr ret = createNewIntArray(cityIds.size());
-	setIntArrayRegion(*ret, 0, cityIds.size(), reinterpret_cast<jint *>(&cityIds[0]));
-	return ret->getReturnValue();
+	UNREF(env);
+	UNREF(self);
+	UNREF(gcwCategory);
+	return 0;
 }
 
 //-----------------------------------------------------------------------
-
 jintArray JNICALL ScriptMethodsPvpNamespace::getGcwDefenderRegionCitiesRebel(JNIEnv *env, jobject self, jstring gcwCategory)
 {
-	JavaStringParam localGcwCategory(gcwCategory);
-	std::string gcwCategoryString;
-	if (!JavaLibrary::convert(localGcwCategory, gcwCategoryString))
-		return 0;
-
-	std::vector<int> cityIds;
-	std::map<std::pair<std::string, int>, uint32> const & gcwRegionDefenderCities = CityInterface::getGcwRegionDefenderCities();
-	for (std::map<std::pair<std::string, int>, uint32>::const_iterator iterCity = gcwRegionDefenderCities.lower_bound(std::make_pair(gcwCategoryString, 0)); ((iterCity != gcwRegionDefenderCities.end()) && (iterCity->first.first == gcwCategoryString)); ++iterCity)
-	{
-		if (PvpData::isRebelFactionId(iterCity->second))
-			cityIds.push_back(iterCity->first.second);
-	}
-
-	if (cityIds.empty())
-		return 0;
-
-	LocalIntArrayRefPtr ret = createNewIntArray(cityIds.size());
-	setIntArrayRegion(*ret, 0, cityIds.size(), reinterpret_cast<jint *>(&cityIds[0]));
-	return ret->getReturnValue();
+	UNREF(env);
+	UNREF(self);
+	UNREF(gcwCategory);
+	return 0;
 }
 
 //-----------------------------------------------------------------------
-
 jintArray JNICALL ScriptMethodsPvpNamespace::getGcwDefenderRegionGuildsImperial(JNIEnv *env, jobject self, jstring gcwCategory)
 {
-	JavaStringParam localGcwCategory(gcwCategory);
-	std::string gcwCategoryString;
-	if (!JavaLibrary::convert(localGcwCategory, gcwCategoryString))
-		return 0;
-
-	std::vector<int> guildIds;
-	std::map<std::pair<std::string, int>, uint32> const & gcwRegionDefenderGuilds = GuildInterface::getGcwRegionDefenderGuilds();
-	for (std::map<std::pair<std::string, int>, uint32>::const_iterator iterGuild = gcwRegionDefenderGuilds.lower_bound(std::make_pair(gcwCategoryString, 0)); ((iterGuild != gcwRegionDefenderGuilds.end()) && (iterGuild->first.first == gcwCategoryString)); ++iterGuild)
-	{
-		if (PvpData::isImperialFactionId(iterGuild->second))
-			guildIds.push_back(iterGuild->first.second);
-	}
-
-	if (guildIds.empty())
-		return 0;
-
-	LocalIntArrayRefPtr ret = createNewIntArray(guildIds.size());
-	setIntArrayRegion(*ret, 0, guildIds.size(), reinterpret_cast<jint *>(&guildIds[0]));
-	return ret->getReturnValue();
+	UNREF(env);
+	UNREF(self);
+	UNREF(gcwCategory);
+	return 0;
 }
 
 //-----------------------------------------------------------------------
-
 jintArray JNICALL ScriptMethodsPvpNamespace::getGcwDefenderRegionGuildsRebel(JNIEnv *env, jobject self, jstring gcwCategory)
 {
-	JavaStringParam localGcwCategory(gcwCategory);
-	std::string gcwCategoryString;
-	if (!JavaLibrary::convert(localGcwCategory, gcwCategoryString))
-		return 0;
-
-	std::vector<int> guildIds;
-	std::map<std::pair<std::string, int>, uint32> const & gcwRegionDefenderGuilds = GuildInterface::getGcwRegionDefenderGuilds();
-	for (std::map<std::pair<std::string, int>, uint32>::const_iterator iterGuild = gcwRegionDefenderGuilds.lower_bound(std::make_pair(gcwCategoryString, 0)); ((iterGuild != gcwRegionDefenderGuilds.end()) && (iterGuild->first.first == gcwCategoryString)); ++iterGuild)
-	{
-		if (PvpData::isRebelFactionId(iterGuild->second))
-			guildIds.push_back(iterGuild->first.second);
-	}
-
-	if (guildIds.empty())
-		return 0;
-
-	LocalIntArrayRefPtr ret = createNewIntArray(guildIds.size());
-	setIntArrayRegion(*ret, 0, guildIds.size(), reinterpret_cast<jint *>(&guildIds[0]));
-	return ret->getReturnValue();
+	UNREF(env);
+	UNREF(self);
+	UNREF(gcwCategory);
+	return 0;
 }
 
 //-----------------------------------------------------------------------
-
 jfloat JNICALL ScriptMethodsPvpNamespace::getGcwDefenderRegionImperialBonus(JNIEnv *env, jobject self, jstring gcwCategory)
 {
 	UNREF(env);
