@@ -892,10 +892,7 @@ int Pvp::calculateGcwImperialScorePercentile(std::string const & gcwCategory, st
 
 float Pvp::getGcwDefenderRegionImperialBonus(std::string const & scoreCategory)
 {
-	GuildObject const * const go = ServerUniverse::getInstance().getMasterGuildObject();
-	if (go)
-		return go->getGcwDefenderRegionImperialBonus(scoreCategory);
-
+	UNREF(scoreCategory);
 	return 0.0f;
 }
 
@@ -903,10 +900,7 @@ float Pvp::getGcwDefenderRegionImperialBonus(std::string const & scoreCategory)
 
 float Pvp::getGcwDefenderRegionRebelBonus(std::string const & scoreCategory)
 {
-	GuildObject const * const go = ServerUniverse::getInstance().getMasterGuildObject();
-	if (go)
-		return go->getGcwDefenderRegionRebelBonus(scoreCategory);
-
+	UNREF(scoreCategory);
 	return 0.0f;
 }
 
@@ -914,46 +908,9 @@ float Pvp::getGcwDefenderRegionRebelBonus(std::string const & scoreCategory)
 
 bool Pvp::getGcwDefenderRegionBonus(CreatureObject const & creature, PlayerObject const & player, float & bonus)
 {
-	std::string const & playerCurrentGcwRegion = player.getCurrentGcwRegion();
-	if (playerCurrentGcwRegion.empty())
-		return false;
-
-	{
-		std::pair<std::string, std::pair<bool, bool> > const & cityGcwDefenderRegionInfo = player.getCityGcwDefenderRegionInfo();
-		if (!cityGcwDefenderRegionInfo.first.empty() && cityGcwDefenderRegionInfo.second.first && (playerCurrentGcwRegion == cityGcwDefenderRegionInfo.first))
-		{
-			uint32 const faction = creature.getPvpFaction();
-			if (PvpData::isImperialFactionId(faction))
-			{
-				bonus = Pvp::getGcwDefenderRegionImperialBonus(playerCurrentGcwRegion);
-				return true;
-			}
-			else if (PvpData::isRebelFactionId(faction))
-			{
-				bonus = Pvp::getGcwDefenderRegionRebelBonus(playerCurrentGcwRegion);
-				return true;
-			}
-		}
-	}
-
-	{
-		std::pair<std::string, std::pair<bool, bool> > const & guildGcwDefenderRegionInfo = player.getGuildGcwDefenderRegionInfo();
-		if (!guildGcwDefenderRegionInfo.first.empty() && guildGcwDefenderRegionInfo.second.first && (playerCurrentGcwRegion == guildGcwDefenderRegionInfo.first))
-		{
-			uint32 const faction = creature.getPvpFaction();
-			if (PvpData::isImperialFactionId(faction))
-			{
-				bonus = Pvp::getGcwDefenderRegionImperialBonus(playerCurrentGcwRegion);
-				return true;
-			}
-			else if (PvpData::isRebelFactionId(faction))
-			{
-				bonus = Pvp::getGcwDefenderRegionRebelBonus(playerCurrentGcwRegion);
-				return true;
-			}
-		}
-	}
-
+	UNREF(creature);
+	UNREF(player);
+	bonus = 0.0f;
 	return false;
 }
 

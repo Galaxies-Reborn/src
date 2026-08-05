@@ -3755,22 +3755,18 @@ void PlayerObject::setTitle(std::string const &title)
 	if (isAuthoritative())
 	{
 		// Make sure the skill title requested is valid
-		if (title == "city_gcw_region_defender")
+		if ((title == "city_gcw_region_defender") ||
+			(title == "guild_gcw_region_defender") ||
+			(title == "imperial_gcw_war_planner") ||
+			(title == "rebel_gcw_war_planner"))
 		{
-			std::pair<std::string, std::pair<bool, bool> > const & cityGcwDefenderRegionInfo = getCityGcwDefenderRegionInfo();
-			if (!cityGcwDefenderRegionInfo.first.empty() && cityGcwDefenderRegionInfo.second.second)
+			std::string const & currentTitle = m_skillTitle.get();
+			if ((currentTitle == "city_gcw_region_defender") ||
+				(currentTitle == "guild_gcw_region_defender") ||
+				(currentTitle == "imperial_gcw_war_planner") ||
+				(currentTitle == "rebel_gcw_war_planner"))
 			{
-				if (title != m_skillTitle.get())
-					m_skillTitle = title;
-			}
-		}
-		else if (title == "guild_gcw_region_defender")
-		{
-			std::pair<std::string, std::pair<bool, bool> > const & guildGcwDefenderRegionInfo = getGuildGcwDefenderRegionInfo();
-			if (!guildGcwDefenderRegionInfo.first.empty() && guildGcwDefenderRegionInfo.second.second)
-			{
-				if (title != m_skillTitle.get())
-					m_skillTitle = title;
+				m_skillTitle = std::string();
 			}
 		}
 		else if (title.empty() || (title == "citizenship") || (SkillManager::getInstance().getSkill(title) != nullptr) || (CollectionsDataTable::isASlotTitle(title) != nullptr) || (CollectionsDataTable::isACollectionTitle(title) != nullptr) || (CollectionsDataTable::isAPageTitle(title) != nullptr) || (GuildRankDataTable::isARankTitle(title) != nullptr) || (CitizenRankDataTable::isARankTitle(title) != nullptr))
@@ -8298,151 +8294,19 @@ void PlayerObject::updateGcwDefenderRegionInfo()
 	if (!isAuthoritative())
 		return;
 
-	CreatureObject const * const owner = getCreatureObject();
-	if (!owner)
-		return;
+	// Publish 14 has no city/guild regional-defender bonuses or titles.
+	m_cityGcwDefenderRegion.set(std::make_pair(std::string(), std::make_pair(false, false)));
+	m_guildGcwDefenderRegion.set(std::make_pair(std::string(), std::make_pair(false, false)));
+	modifyCollectionSlotValue("imperial_gcw_war_planner", -1ll);
+	modifyCollectionSlotValue("rebel_gcw_war_planner", -1ll);
 
-	int timeQualifyForBonus = -1;
-	bool qualifyForWarPlannerTitle = false;
-
-	std::string cityGcwDefenderRegion;
-	bool cityGcwDefenderRegionHasBonus = false;;
-	bool cityGcwDefenderRegionHasTitle = false;;
-
-	std::vector<int> const & cityIds = CityInterface::getCitizenOfCityId(owner->getNetworkId());
-	if (!cityIds.empty())
+	std::string const & currentTitle = getTitle();
+	if ((currentTitle == "city_gcw_region_defender") ||
+		(currentTitle == "guild_gcw_region_defender") ||
+		(currentTitle == "imperial_gcw_war_planner") ||
+		(currentTitle == "rebel_gcw_war_planner"))
 	{
-		CityInfo const & cityInfo = CityInterface::getCityInfo(cityIds.front());
-		uint32 const cityFaction = cityInfo.getFaction();
-
-		// mayor who is same aligned with his aligned city can use the "War Planner" title
-		if (!PvpData::isNeutralFactionId(cityFaction) && (cityFaction == owner->getPvpFaction()) && (cityInfo.getLeaderId() == owner->getNetworkId()))
-			qualifyForWarPlannerTitle = true;
-
-		std::string const & gcwDefenderRegion = cityInfo.getGcwDefenderRegion();
-		if (!gcwDefenderRegion.empty())
-		{
-			cityGcwDefenderRegion = gcwDefenderRegion;
-
-			int const timeJoinedGcwDefenderRegion = cityInfo.getTimeJoinedGcwDefenderRegion();
-			timeQualifyForBonus = static_cast<int>(::time(nullptr)) - (ConfigServerGame::getGcwDaysRequiredForGcwRegionDefenderBonus() * 86400);
-			if (!PvpData::isNeutralFactionId(cityFaction) && (cityFaction == owner->getPvpFaction()) && (timeJoinedGcwDefenderRegion < timeQualifyForBonus))
-			{				
-				cityGcwDefenderRegionHasBonus = true;
-
-				int regionPercentileScore = 0;
-				if (PvpData::isImperialFactionId(cityFaction))
-					regionPercentileScore = ServerUniverse::getInstance().getGcwImperialScorePercentile(gcwDefenderRegion);
-				else if (PvpData::isRebelFactionId(cityFaction))
-					regionPercentileScore = 100 - ServerUniverse::getInstance().getGcwImperialScorePercentile(gcwDefenderRegion);
-
-				// title is available once the region is 70% controlled
-				if (regionPercentileScore >= 70)
-					cityGcwDefenderRegionHasTitle = true;
-			}
-		}
-	}
-
-	std::string guildGcwDefenderRegion;
-	bool guildGcwDefenderRegionHasBonus = false;;
-	bool guildGcwDefenderRegionHasTitle = false;;
-
-	int const guildId = owner->getGuildId();
-	if (guildId > 0)
-	{
-		GuildInfo const * const gi = GuildInterface::getGuildInfo(guildId);
-		if (gi)
-		{
-			uint32 const guildFaction = GuildInterface::getGuildCurrentFaction(*gi);
-
-			// guild leader who is same aligned with his aligned guild that meets the
-			// minimum guild member count requirement can use the "War Planner" title
-			if (!PvpData::isNeutralFactionId(guildFaction) && (guildFaction == owner->getPvpFaction()) && (gi->m_leaderId == owner->getNetworkId()) && (gi->getCountMembersOnly() >= ConfigServerGame::getGcwGuildMinMembersForGcwRegionDefender()))
-				qualifyForWarPlannerTitle = true;
-
-			std::string const & gcwDefenderRegion = GuildInterface::getGuildCurrentGcwDefenderRegion(*gi);
-			if (!gcwDefenderRegion.empty())
-			{
-				guildGcwDefenderRegion = gcwDefenderRegion;
-
-				int const timeJoinedGcwDefenderRegion = GuildInterface::getTimeJoinedGuildCurrentGcwDefenderRegion(*gi);
-				if (timeQualifyForBonus < 0)
-					timeQualifyForBonus = static_cast<int>(::time(nullptr)) - (ConfigServerGame::getGcwDaysRequiredForGcwRegionDefenderBonus() * 86400);
-
-				if (!PvpData::isNeutralFactionId(guildFaction) && (guildFaction == owner->getPvpFaction()) && (timeJoinedGcwDefenderRegion < timeQualifyForBonus))
-				{
-					guildGcwDefenderRegionHasBonus = true;
-
-					int regionPercentileScore = 0;
-					if (PvpData::isImperialFactionId(guildFaction))
-						regionPercentileScore = ServerUniverse::getInstance().getGcwImperialScorePercentile(gcwDefenderRegion);
-					else if (PvpData::isRebelFactionId(guildFaction))
-						regionPercentileScore = 100 - ServerUniverse::getInstance().getGcwImperialScorePercentile(gcwDefenderRegion);
-
-					// title is available once the region is 70% controlled
-					if (regionPercentileScore >= 70)
-						guildGcwDefenderRegionHasTitle = true;
-				}
-			}
-		}
-	}
-
-	m_cityGcwDefenderRegion.set(std::make_pair(cityGcwDefenderRegion, std::make_pair(cityGcwDefenderRegionHasBonus, cityGcwDefenderRegionHasTitle)));
-	m_guildGcwDefenderRegion.set(std::make_pair(guildGcwDefenderRegion, std::make_pair(guildGcwDefenderRegionHasBonus, guildGcwDefenderRegionHasTitle)));
-
-	// clear title if not qualified
-	{
-		std::string const & currentTitle = getTitle();
-		if (currentTitle == "city_gcw_region_defender")
-		{
-			if (cityGcwDefenderRegion.empty() || !cityGcwDefenderRegionHasTitle)
-				setTitle(std::string());
-		}
-		else if (currentTitle == "guild_gcw_region_defender")
-		{
-			if (guildGcwDefenderRegion.empty() || !guildGcwDefenderRegionHasTitle)
-				setTitle(std::string());
-		}
-	}
-
-	// grant/clear "War Planner" title
-	{
-		std::string const & currentTitle = getTitle();
-		if (qualifyForWarPlannerTitle)
-		{
-			if (PvpData::isImperialFactionId(owner->getPvpFaction()))
-			{
-				modifyCollectionSlotValue("imperial_gcw_war_planner", 1ll);
-				modifyCollectionSlotValue("rebel_gcw_war_planner", -1ll);
-
-				if (currentTitle == "rebel_gcw_war_planner")
-					setTitle("imperial_gcw_war_planner");
-			}
-			else if (PvpData::isRebelFactionId(owner->getPvpFaction()))
-			{
-				modifyCollectionSlotValue("imperial_gcw_war_planner", -1ll);
-				modifyCollectionSlotValue("rebel_gcw_war_planner", 1ll);
-
-				if (currentTitle == "imperial_gcw_war_planner")
-					setTitle("rebel_gcw_war_planner");
-			}
-			else
-			{
-				modifyCollectionSlotValue("imperial_gcw_war_planner", -1ll);
-				modifyCollectionSlotValue("rebel_gcw_war_planner", -1ll);
-
-				if ((currentTitle == "imperial_gcw_war_planner") || (currentTitle == "rebel_gcw_war_planner"))
-					setTitle(std::string());
-			}
-		}
-		else
-		{
-			modifyCollectionSlotValue("imperial_gcw_war_planner", -1ll);
-			modifyCollectionSlotValue("rebel_gcw_war_planner", -1ll);
-
-			if ((currentTitle == "imperial_gcw_war_planner") || (currentTitle == "rebel_gcw_war_planner"))
-				setTitle(std::string());
-		}
+		setTitle(std::string());
 	}
 }
 

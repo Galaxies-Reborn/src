@@ -343,30 +343,42 @@ jint JNICALL ScriptMethodsGuildNamespace::guildGetTimeLeftPreviousFaction(JNIEnv
 
 jstring JNICALL ScriptMethodsGuildNamespace::guildGetCurrentGcwDefenderRegion(JNIEnv *env, jobject self, jint guildId)
 {
-	JavaString str(GuildInterface::getGuildCurrentGcwDefenderRegion(guildId).c_str());
-	return str.getReturnValue();
+	UNREF(env);
+	UNREF(self);
+	UNREF(guildId);
+	JavaString emptyRegion("");
+	return emptyRegion.getReturnValue();
 }
 
 // ----------------------------------------------------------------------
 
 jint JNICALL ScriptMethodsGuildNamespace::guildGetTimeJoinedCurrentGcwDefenderRegion(JNIEnv *env, jobject self, jint guildId)
 {
-	return GuildInterface::getTimeJoinedGuildCurrentGcwDefenderRegion(guildId);
+	UNREF(env);
+	UNREF(self);
+	UNREF(guildId);
+	return 0;
 }
 
 // ----------------------------------------------------------------------
 
 jstring JNICALL ScriptMethodsGuildNamespace::guildGetPreviousGcwDefenderRegion(JNIEnv *env, jobject self, jint guildId)
 {
-	JavaString str(GuildInterface::getGuildPreviousGcwDefenderRegion(guildId).c_str());
-	return str.getReturnValue();
+	UNREF(env);
+	UNREF(self);
+	UNREF(guildId);
+	JavaString emptyRegion("");
+	return emptyRegion.getReturnValue();
 }
 
 // ----------------------------------------------------------------------
 
 jint JNICALL ScriptMethodsGuildNamespace::guildGetTimeLeftPreviousGcwDefenderRegion(JNIEnv *env, jobject self, jint guildId)
 {
-	return GuildInterface::getTimeLeftGuildPreviousGcwDefenderRegion(guildId);
+	UNREF(env);
+	UNREF(self);
+	UNREF(guildId);
+	return 0;
 }
 
 // ----------------------------------------------------------------------
@@ -551,32 +563,10 @@ void JNICALL ScriptMethodsGuildNamespace::guildSetFaction(JNIEnv *env, jobject s
 
 void JNICALL ScriptMethodsGuildNamespace::guildSetGcwDefenderRegion(JNIEnv *env, jobject self, jint guildId, jstring gcwDefenderRegion)
 {
-	JavaStringParam localGcwDefenderRegionStr(gcwDefenderRegion);
-	std::string gcwDefenderRegionStr;
-	if (JavaLibrary::convert(localGcwDefenderRegionStr, gcwDefenderRegionStr))
-	{
-		if (!gcwDefenderRegionStr.empty())
-		{
-			Pvp::GcwScoreCategory const * const gcwCategory = Pvp::getGcwScoreCategory(gcwDefenderRegionStr);
-			if (!gcwCategory)
-			{
-				DEBUG_WARNING(true, ("JavaLibrary::guildSetGcwDefenderRegion: invalid GCW score category (%s)", gcwDefenderRegionStr.c_str()));
-				return;
-			}
-
-			if (!gcwCategory->gcwRegionDefender)
-			{
-				DEBUG_WARNING(true, ("JavaLibrary::guildSetGcwDefenderRegion: GCW score category (%s) is not flagged as GcwRegionDefender", gcwDefenderRegionStr.c_str()));
-				return;
-			}
-		}
-	}
-	else
-	{
-		gcwDefenderRegionStr.clear();
-	}
-
-	GuildInterface::setGuildGcwDefenderRegion(guildId, gcwDefenderRegionStr);
+	UNREF(env);
+	UNREF(self);
+	UNREF(gcwDefenderRegion);
+	GuildInterface::setGuildGcwDefenderRegion(guildId, std::string());
 }
 
 // ----------------------------------------------------------------------
@@ -828,5 +818,3 @@ void JNICALL ScriptMethodsGuildNamespace::guildSetAbbrev(JNIEnv *env, jobject se
 }
 
 // ======================================================================
-
-

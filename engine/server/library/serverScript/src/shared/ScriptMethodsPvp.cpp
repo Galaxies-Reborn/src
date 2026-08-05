@@ -1479,11 +1479,6 @@ void JNICALL ScriptMethodsPvpNamespace::pvpModifyCurrentGcwPoints(JNIEnv *env, j
 	PlayerObject * const player = PlayerCreatureController::getPlayerObject(creature);
 	if (player)
 	{
-		// grant GCW Region Defender bonus
-		float bonus = 0.0f;
-		if ((adjustment > 0) && Pvp::getGcwDefenderRegionBonus(*creature, *player, bonus) && (bonus > 0.0f))
-			adjustment += std::max(1, static_cast<int>(static_cast<double>(bonus) * static_cast<double>(adjustment) / static_cast<double>(100)));
-
 		player->modifyCurrentGcwPoints(adjustment, true);
 	}
 }
@@ -1856,32 +1851,8 @@ jobject JNICALL ScriptMethodsPvpNamespace::getGcwContributionTrackingTableDictio
 
 jobjectArray JNICALL ScriptMethodsPvpNamespace::getGcwDefenderRegions(JNIEnv * /*env*/, jobject /*self*/)
 {
-	// walk the list twice, this method shouldn't get called
-	// very often as the result is cached in script
-	std::map<std::string, Pvp::GcwScoreCategory const *> const & allGcwScoreCategory = Pvp::getAllGcwScoreCategory(); 
-	std::map<std::string, Pvp::GcwScoreCategory const *>::const_iterator iter;
-	int count = 0;
-	for (iter = allGcwScoreCategory.begin(); iter != allGcwScoreCategory.end(); ++iter)
-	{
-		if (iter->second->gcwRegionDefender)
-			++count;
-	}
-
-	if (count <= 0)
-		return 0;
-
-	LocalObjectArrayRefPtr valueArray = createNewObjectArray(count, JavaLibrary::getClsString());
-	count = 0;
-	for (iter = allGcwScoreCategory.begin(); iter != allGcwScoreCategory.end(); ++iter)
-	{
-		if (iter->second->gcwRegionDefender)
-		{
-			JavaString jval(std::string("@gcw_regions:") + iter->second->categoryName);
-			setObjectArrayElement(*valueArray, count++, jval);
-		}
-	}
-
-	return valueArray->getReturnValue();
+	// Publish 14 has no city/guild GCW regional-defender membership surface.
+	return 0;
 }
 
 //-----------------------------------------------------------------------
@@ -2212,24 +2183,20 @@ jintArray JNICALL ScriptMethodsPvpNamespace::getGcwDefenderRegionGuildsRebel(JNI
 
 jfloat JNICALL ScriptMethodsPvpNamespace::getGcwDefenderRegionImperialBonus(JNIEnv *env, jobject self, jstring gcwCategory)
 {
-	JavaStringParam localGcwCategory(gcwCategory);
-	std::string gcwCategoryString;
-	if (!JavaLibrary::convert(localGcwCategory, gcwCategoryString))
-		return 0.0f;
-
-	return Pvp::getGcwDefenderRegionImperialBonus(gcwCategoryString);
+	UNREF(env);
+	UNREF(self);
+	UNREF(gcwCategory);
+	return 0.0f;
 }
 
 //-----------------------------------------------------------------------
 
 jfloat JNICALL ScriptMethodsPvpNamespace::getGcwDefenderRegionRebelBonus(JNIEnv *env, jobject self, jstring gcwCategory)
 {
-	JavaStringParam localGcwCategory(gcwCategory);
-	std::string gcwCategoryString;
-	if (!JavaLibrary::convert(localGcwCategory, gcwCategoryString))
-		return 0.0f;
-
-	return Pvp::getGcwDefenderRegionRebelBonus(gcwCategoryString);
+	UNREF(env);
+	UNREF(self);
+	UNREF(gcwCategory);
+	return 0.0f;
 }
 
 // ======================================================================

@@ -389,14 +389,21 @@ jint JNICALL ScriptMethodsCityNamespace::cityGetFaction(JNIEnv *env, jobject sel
 
 jstring JNICALL ScriptMethodsCityNamespace::cityGetGcwDefenderRegion(JNIEnv *env, jobject self, jint cityId)
 {
-	return JavaString(CityInterface::getCityInfo(cityId).getGcwDefenderRegion().c_str()).getReturnValue();
+	UNREF(env);
+	UNREF(self);
+	UNREF(cityId);
+	JavaString emptyRegion("");
+	return emptyRegion.getReturnValue();
 }
 
 // ----------------------------------------------------------------------
 
 jint JNICALL ScriptMethodsCityNamespace::cityGetTimeJoinedGcwDefenderRegion(JNIEnv *env, jobject self, jint cityId)
 {
-	return CityInterface::getCityInfo(cityId).getTimeJoinedGcwDefenderRegion();
+	UNREF(env);
+	UNREF(self);
+	UNREF(cityId);
+	return 0;
 }
 
 // ----------------------------------------------------------------------
@@ -672,32 +679,12 @@ void JNICALL ScriptMethodsCityNamespace::citySetFaction(JNIEnv *env, jobject sel
 
 void JNICALL ScriptMethodsCityNamespace::citySetGcwDefenderRegion(JNIEnv *env, jobject self, jint cityId, jstring gcwDefenderRegion, jint timeJoined, jboolean notifyCitizens)
 {
-	JavaStringParam localGcwDefenderRegionStr(gcwDefenderRegion);
-	std::string gcwDefenderRegionStr;
-	if (JavaLibrary::convert(localGcwDefenderRegionStr, gcwDefenderRegionStr))
-	{
-		if (!gcwDefenderRegionStr.empty())
-		{
-			Pvp::GcwScoreCategory const * const gcwCategory = Pvp::getGcwScoreCategory(gcwDefenderRegionStr);
-			if (!gcwCategory)
-			{
-				DEBUG_WARNING(true, ("JavaLibrary::citySetGcwDefenderRegion: invalid GCW score category (%s)", gcwDefenderRegionStr.c_str()));
-				return;
-			}
-
-			if (!gcwCategory->gcwRegionDefender)
-			{
-				DEBUG_WARNING(true, ("JavaLibrary::citySetGcwDefenderRegion: GCW score category (%s) is not flagged as GcwRegionDefender", gcwDefenderRegionStr.c_str()));
-				return;
-			}
-		}
-	}
-	else
-	{
-		gcwDefenderRegionStr.clear();
-	}
-
-	CityInterface::setCityGcwDefenderRegion(cityId, gcwDefenderRegionStr, timeJoined, (notifyCitizens != JNI_FALSE));
+	UNREF(env);
+	UNREF(self);
+	UNREF(gcwDefenderRegion);
+	UNREF(timeJoined);
+	UNREF(notifyCitizens);
+	CityInterface::setCityGcwDefenderRegion(cityId, std::string(), 0, false);
 }
 
 // ----------------------------------------------------------------------
