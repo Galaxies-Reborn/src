@@ -1715,6 +1715,14 @@ void JNICALL ScriptMethodsPvpNamespace::ctsUseOnlySetGcwInfo(JNIEnv *env, jobjec
 
 void JNICALL ScriptMethodsPvpNamespace::adjustGcwImperialScore(JNIEnv *env, jobject self, jstring source, jlong sourceOid, jstring gcwCategory, jint adjustment)
 {
+	UNREF(env);
+	UNREF(self);
+	UNREF(source);
+	UNREF(sourceOid);
+	UNREF(gcwCategory);
+	UNREF(adjustment);
+	return;
+
 	JavaStringParam localSource(source);
 	std::string sourceString;
 	JavaLibrary::convert(localSource, sourceString);
@@ -1733,6 +1741,14 @@ void JNICALL ScriptMethodsPvpNamespace::adjustGcwImperialScore(JNIEnv *env, jobj
 
 void JNICALL ScriptMethodsPvpNamespace::adjustGcwRebelScore(JNIEnv *env, jobject self, jstring source, jlong sourceOid, jstring gcwCategory, jint adjustment)
 {
+	UNREF(env);
+	UNREF(self);
+	UNREF(source);
+	UNREF(sourceOid);
+	UNREF(gcwCategory);
+	UNREF(adjustment);
+	return;
+
 	JavaStringParam localSource(source);
 	std::string sourceString;
 	JavaLibrary::convert(localSource, sourceString);

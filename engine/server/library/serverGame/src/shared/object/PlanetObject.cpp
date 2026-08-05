@@ -1192,6 +1192,11 @@ void PlanetObject::handleCMessageTo(MessageToPayload const &message)
 	}
 	else if (message.getMethod() == "C++DoGcwDecay")
 	{
+		// Publish 14 has no weekly regional-score decay loop.  Retain the
+		// compatibility message name, but clear its stale schedule and fail closed.
+		removeObjVarItem("gcwScore.nextDecayTime");
+		return;
+
 		// start decay handling loop
 		int const now = static_cast<int>(::time(nullptr));
 		int timeNextGcwScoreDecay;
@@ -1299,6 +1304,10 @@ void PlanetObject::handleCMessageTo(MessageToPayload const &message)
 	}
 	else if (message.getMethod() == "C++DoGcwDecayImmediate")
 	{
+		// Compatibility sink for pre-deployment admin decay messages.
+		removeObjVarItem("gcwScore.nextDecayTime");
+		return;
+
 		if ((m_planetName.get() == "tatooine") && !message.getPackedDataVector().empty())
 		{
 			bool recalculatePercentile = false;
@@ -1395,6 +1404,11 @@ void PlanetObject::endBaselines()
 					m_gcwRebelScore.set(i.getName(), std::make_pair(scoreObjvar[0].getValue(), scoreObjvar[1].getValue()));
 			}
 		}
+
+		// Publish 14 retains the read-only regional data needed by later content,
+		// but does not schedule the NGE weekly regional-score decay loop.
+		removeObjVarItem("gcwScore.nextDecayTime");
+		return;
 
 		// start decay handling loop
 		int const now = static_cast<int>(::time(nullptr));
@@ -2196,6 +2210,13 @@ void PlanetObject::updateGcwTrackingData()
 		}
 	}
 
+	// Publish 14 has no regional-score adjustment pipeline.  Cross-galaxy score
+	// presentation above remains read-only; discard any stale queued mutations.
+	m_gcwImperialScoreAdjustment.clear();
+	m_gcwRebelScoreAdjustment.clear();
+	m_nextGcwTrackingUpdate = 0;
+	return;
+
 	if (m_nextGcwTrackingUpdate == 0)
 		return;
 
@@ -2329,6 +2350,12 @@ void PlanetObject::updateGcwTrackingData()
 
 void PlanetObject::adjustGcwImperialScore(std::string const & source, CreatureObject * sourceObject, std::string const & gcwCategory, int64 adjustment)
 {
+	UNREF(source);
+	UNREF(sourceObject);
+	UNREF(gcwCategory);
+	UNREF(adjustment);
+	return;
+
 	Pvp::GcwScoreCategory const * const gcwCategoryData = Pvp::getGcwScoreCategory(gcwCategory);
 	if (!gcwCategoryData)
 		return;
@@ -2374,6 +2401,12 @@ void PlanetObject::adjustGcwImperialScore(std::string const & source, CreatureOb
 
 void PlanetObject::adjustGcwRebelScore(std::string const & source, CreatureObject * sourceObject, std::string const & gcwCategory, int64 adjustment)
 {
+	UNREF(source);
+	UNREF(sourceObject);
+	UNREF(gcwCategory);
+	UNREF(adjustment);
+	return;
+
 	Pvp::GcwScoreCategory const * const gcwCategoryData = Pvp::getGcwScoreCategory(gcwCategory);
 	if (!gcwCategoryData)
 		return;

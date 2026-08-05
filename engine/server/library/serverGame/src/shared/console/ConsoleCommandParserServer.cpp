@@ -3103,8 +3103,7 @@ bool ConsoleCommandParserServer::performParsing2(const NetworkId & userId, const
 		}
 		else
 		{
-			result += Unicode::narrowToWide(FormattedString<1024>().sprintf("Requesting adjustment of imperial score for GCW score category (%s) by (%d).  It can take up to 1 minute for the adjustment request to be completed.\n", category.c_str(), adjustment));
-			ServerUniverse::getInstance().adjustGcwImperialScore("remote server adjustGcwImperialScore", nullptr, category, adjustment);
+			result += Unicode::narrowToWide(FormattedString<1024>().sprintf("Publish 14 regional GCW score adjustment is retired; imperial category (%s) was not changed by (%d).\n", category.c_str(), adjustment));
 		}
 	}
 	else if (isAbbrev(argv[0], "adjustGcwRebelScore"))
@@ -3126,8 +3125,7 @@ bool ConsoleCommandParserServer::performParsing2(const NetworkId & userId, const
 		}
 		else
 		{
-			result += Unicode::narrowToWide(FormattedString<1024>().sprintf("Requesting adjustment of rebel score for GCW score category (%s) by (%d).  It can take up to 1 minute for the adjustment request to be completed.\n", category.c_str(), adjustment));
-			ServerUniverse::getInstance().adjustGcwRebelScore("remote server adjustGcwRebelScore", nullptr, category, adjustment);
+			result += Unicode::narrowToWide(FormattedString<1024>().sprintf("Publish 14 regional GCW score adjustment is retired; rebel category (%s) was not changed by (%d).\n", category.c_str(), adjustment));
 		}
 	}
 	else if (isAbbrev(argv[0], "decayGcwScore"))
@@ -3148,12 +3146,7 @@ bool ConsoleCommandParserServer::performParsing2(const NetworkId & userId, const
 		}
 		else
 		{
-			result += Unicode::narrowToWide(FormattedString<1024>().sprintf("Requesting immediate GCW score decay for category (%s).\n", category.c_str()));
-			PlanetObject const * const tatooine = ServerUniverse::getInstance().getTatooinePlanet();
-			if (tatooine)
-			{
-				MessageToQueue::sendMessageToC(tatooine->getNetworkId(), "C++DoGcwDecayImmediate", category, 0, false);
-			}
+			result += Unicode::narrowToWide(FormattedString<1024>().sprintf("Publish 14 regional GCW score decay is retired; category (%s) was not changed.\n", category.c_str()));
 		}
 	}
 	else if (isAbbrev(argv[0], "showGcwFactionalPresence"))
