@@ -14756,7 +14756,7 @@ void CreatureObject::getLfgCharacterData(LfgCharacterData & lfgCharacterData) co
 	{
 		lfgCharacterData.characterAge = playerObject->getAgeInDays();
 
-		lfgCharacterData.profession = LfgCharacterData::convertSkillTemplateToProfession(playerObject->getSkillTemplate());
+		lfgCharacterData.profession = LfgCharacterData::Prof_Unknown;
 
 		MatchMakingId const & id = playerObject->getMatchMakingCharacterProfileId();
 		lfgCharacterData.anonymous = id.isBitSet(MatchMakingId::B_anonymous);
@@ -14821,7 +14821,7 @@ void CreatureObject::getLfgCharacterData(LfgCharacterData & lfgCharacterData) co
 		}
 	}
 
-	lfgCharacterData.level = getLevel();
+	lfgCharacterData.level = isPlayerControlled() ? 0 : getLevel();
 	lfgCharacterData.faction = getPvpFaction();
 
 	int const guildId = getGuildId();
@@ -15069,18 +15069,12 @@ GroupMemberParam const CreatureObjectNamespace::GroupHelpers::buildGroupMemberPa
 	ShipObject const * const shipObject = ShipObject::getContainingShipObject(creatureObject);
 	NetworkId const & memberId = creatureObject->getNetworkId();
 	std::string const & name = Unicode::wideToNarrow(creatureObject->getEncodedObjectName());
-	int const level = creatureObject->getLevel();
 	bool const memberIsPC = creatureObject->isPlayerControlled();
+	int const level = memberIsPC ? 0 : creatureObject->getLevel();
 	LfgCharacterData::Profession profession = LfgCharacterData::Prof_Unknown;
 	if (!memberIsPC)
 	{
 		profession = LfgCharacterData::Prof_NPC;
-	}
-	else
-	{
-		PlayerObject const * const playerObject = PlayerCreatureController::getPlayerObject(creatureObject);
-		if (playerObject)
-			profession = LfgCharacterData::convertSkillTemplateToProfession(playerObject->getSkillTemplate());
 	}
 
 	NetworkId const & shipId = (shipObject != 0) ? shipObject->getNetworkId() : NetworkId::cms_invalid;

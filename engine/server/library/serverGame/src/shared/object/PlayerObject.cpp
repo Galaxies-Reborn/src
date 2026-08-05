@@ -4115,11 +4115,11 @@ void PlayerObject::handleCMessageTo(const MessageToPayload &message)
 						GuildMemberInfo const * const guildMemberInfo = GuildInterface::getGuildMemberInfo(guildId, owner->getNetworkId());
 						if (guildMemberInfo)
 						{
-							std::string const & professionSkillTemplate = getSkillTemplate();
-							bool const professionSkillTemplateDiffers = (!professionSkillTemplate.empty() && (guildMemberInfo->m_professionSkillTemplate != professionSkillTemplate));
+							std::string const professionSkillTemplate;
+							bool const professionSkillTemplateDiffers = !guildMemberInfo->m_professionSkillTemplate.empty();
 
-							int const level = owner->getLevel();
-							bool const levelDifers = ((level > 0) && (guildMemberInfo->m_level != level));
+							int const level = 0;
+							bool const levelDifers = (guildMemberInfo->m_level != level);
 
 							if (professionSkillTemplateDiffers || levelDifers)
 							{
@@ -4160,11 +4160,11 @@ void PlayerObject::handleCMessageTo(const MessageToPayload &message)
 					}
 					else
 					{
-						std::string const & professionSkillTemplate = getSkillTemplate();
-						bool const professionSkillTemplateDiffers = (!professionSkillTemplate.empty() && (citizenInfo->m_citizenProfessionSkillTemplate != professionSkillTemplate));
+						std::string const professionSkillTemplate;
+						bool const professionSkillTemplateDiffers = !citizenInfo->m_citizenProfessionSkillTemplate.empty();
 
-						int const level = owner->getLevel();
-						bool const levelDifers = ((level > 0) && (citizenInfo->m_citizenLevel != level));
+						int const level = 0;
+						bool const levelDifers = (citizenInfo->m_citizenLevel != level);
 
 						if (professionSkillTemplateDiffers || levelDifers)
 						{
@@ -6487,50 +6487,38 @@ std::string const & PlayerObject::getSkillTemplate() const
 bool PlayerObject::setSkillTemplate(std::string const & templateName, bool const clientRequest)
 {
 	std::string const previousTemplateName(m_skillTemplate.get());
-
-	// we need to pass an empty string to script to do cleanup, but we don't want to actually change the player's skill
 	if (!templateName.empty())
-		m_skillTemplate.set(templateName);
-
-	CreatureObject * const owner = getCreatureObject();
-	if(owner)
 	{
-		GameScriptObject * const script = owner->getScriptObject();
-		if(script)
-		{
-			ScriptParams params;
-
-			params.addParam(templateName.c_str());
-			params.addParam(clientRequest);
-
-			if (script->trigAllScripts(Scripting::TRIG_SKILL_TEMPLATE_CHANGED, params) == SCRIPT_DEFAULT)
-			{
-				m_skillTemplate.set(previousTemplateName);
-				LOG("ScriptInvestigation", ("Scripts blocked setSkillTemplate( %s ) on Player( %s ).  Reverting to %s.", templateName.c_str(), getAccountDescription().c_str(), previousTemplateName.c_str()));
-			}
-		}
-
-		if (previousTemplateName != m_skillTemplate.get())
-		{
-			uint8 const newProfession = static_cast<uint8>(LfgCharacterData::convertSkillTemplateToProfession(m_skillTemplate.get()));
-
-			GroupObject * const group = owner->getGroup();
-			if (group)
-			{
-				uint8 const currentProfessionForGroup = group->getMemberProfession(owner->getNetworkId());
-
-				if (newProfession != currentProfessionForGroup)
-					group->setMemberProfession(owner->getNetworkId(), newProfession);
-			}
-
-			std::map<NetworkId, LfgCharacterData> const & connectedCharacterLfgData = ServerUniverse::getConnectedCharacterLfgData();
-			std::map<NetworkId, LfgCharacterData>::const_iterator iterFind = connectedCharacterLfgData.find(owner->getNetworkId());
-			if ((iterFind != connectedCharacterLfgData.end()) && (iterFind->second.profession != static_cast<LfgCharacterData::Profession>(newProfession)))
-				ServerUniverse::setConnectedCharacterProfessionData(owner->getNetworkId(), static_cast<LfgCharacterData::Profession>(newProfession));
-		}
+		LOG("PreCuRestore", ("Ignored retired NGE skill template [%s] for player [%s]",
+			templateName.c_str(), getAccountDescription().c_str()));
 	}
 
-	return (templateName != previousTemplateName);
+	// Publish 14.1 progression is owned by independent skill boxes.  This
+	// compatibility field must stay empty, including when clearing persisted
+	// NGE state through the script API.
+	m_skillTemplate.set(std::string());
+
+	CreatureObject * const owner = getCreatureObject();
+	if (owner)
+	{
+		uint8 const newProfession = static_cast<uint8>(LfgCharacterData::Prof_Unknown);
+
+		GroupObject * const group = owner->getGroup();
+		if (group)
+		{
+			uint8 const currentProfessionForGroup = group->getMemberProfession(owner->getNetworkId());
+			if (newProfession != currentProfessionForGroup)
+				group->setMemberProfession(owner->getNetworkId(), newProfession);
+		}
+
+		std::map<NetworkId, LfgCharacterData> const & connectedCharacterLfgData = ServerUniverse::getConnectedCharacterLfgData();
+		std::map<NetworkId, LfgCharacterData>::const_iterator iterFind = connectedCharacterLfgData.find(owner->getNetworkId());
+		if ((iterFind != connectedCharacterLfgData.end()) && (iterFind->second.profession != LfgCharacterData::Prof_Unknown))
+			ServerUniverse::setConnectedCharacterProfessionData(owner->getNetworkId(), LfgCharacterData::Prof_Unknown);
+	}
+
+	UNREF(clientRequest);
+	return !previousTemplateName.empty();
 }
 
 // ----------------------------------------------------------------------
@@ -6545,30 +6533,15 @@ std::string const & PlayerObject::getWorkingSkill() const
 bool PlayerObject::setWorkingSkill(std::string const & skillName, bool const clientRequest)
 {
 	std::string const previousWorkingSkill(m_workingSkill.get());
-
-	m_workingSkill.set(skillName);
-
-	CreatureObject * const owner = getCreatureObject();
-	if(owner)
+	if (!skillName.empty())
 	{
-		GameScriptObject * const script = owner->getScriptObject();
-		if(script)
-		{
-			ScriptParams params;
-
-			params.addParam(skillName.c_str());
-			params.addParam(clientRequest);
-
-			if (script->trigAllScripts(Scripting::TRIG_WORKING_SKILL_CHANGED, params) == SCRIPT_DEFAULT)
-			{
-				m_workingSkill.set(previousWorkingSkill);
-				LOG("ScriptInvestigation", ("Scripts blocked setWorkingSkill( %s ) on Player( %s ). Reverting to %s.", skillName.c_str(), getAccountDescription().c_str(), previousWorkingSkill.c_str()));
-			}
-		}
+		LOG("PreCuRestore", ("Ignored retired NGE working skill [%s] for player [%s]",
+			skillName.c_str(), getAccountDescription().c_str()));
 	}
 
-
-	return (previousWorkingSkill != skillName);
+	m_workingSkill.set(std::string());
+	UNREF(clientRequest);
+	return !previousWorkingSkill.empty();
 }
 
 // ----------------------------------------------------------------------

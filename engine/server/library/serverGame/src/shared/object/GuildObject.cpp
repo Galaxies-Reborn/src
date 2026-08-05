@@ -766,6 +766,8 @@ void GuildObject::removeGuildMember(int guildId, NetworkId const &memberId)
 
 void GuildObject::addGuildCreatorMember(int guildId, NetworkId const &memberId, std::string const &memberName, std::string const &memberProfessionSkillTemplate, int const memberLevel)
 {
+	UNREF(memberProfessionSkillTemplate);
+	UNREF(memberLevel);
 	GuildMemberInfo const * const existingGmi = getGuildMemberInfo(guildId, memberId);
 	std::string realMemberName = memberName;
 	if (realMemberName.empty() && existingGmi)
@@ -785,34 +787,8 @@ void GuildObject::addGuildCreatorMember(int guildId, NetworkId const &memberId, 
 		return;
 	}
 
-	std::string realMemberProfessionSkillTemplate = memberProfessionSkillTemplate;
-	int realMemberLevel = memberLevel;
-	if (realMemberProfessionSkillTemplate.empty() || (realMemberLevel <= 0))
-	{
-		if (existingGmi)
-		{
-			realMemberProfessionSkillTemplate = existingGmi->m_professionSkillTemplate;
-			realMemberLevel = existingGmi->m_level;
-		}
-		else
-		{
-			if (!so)
-				so = ServerWorld::findObjectByNetworkId(memberId);
-
-			if (so)
-			{
-				CreatureObject const * const co = so->asCreatureObject();
-				if (co)
-				{
-					realMemberLevel = co->getLevel();
-
-					PlayerObject const * const player = PlayerCreatureController::getPlayerObject(co);
-					if (player)
-						realMemberProfessionSkillTemplate = player->getSkillTemplate();
-				}
-			}
-		}
-	}
+	std::string const realMemberProfessionSkillTemplate;
+	int const realMemberLevel = 0;
 
 	if (!isAuthoritative())
 	{
@@ -878,6 +854,8 @@ void GuildObject::addGuildCreatorMember(int guildId, NetworkId const &memberId, 
 
 void GuildObject::addGuildSponsorMember(int guildId, NetworkId const &memberId, std::string const &memberName, std::string const &memberProfessionSkillTemplate, int const memberLevel)
 {
+	UNREF(memberProfessionSkillTemplate);
+	UNREF(memberLevel);
 	GuildMemberInfo const * const existingGmi = getGuildMemberInfo(guildId, memberId);
 	std::string realMemberName = memberName;
 	if (realMemberName.empty() && existingGmi)
@@ -897,34 +875,8 @@ void GuildObject::addGuildSponsorMember(int guildId, NetworkId const &memberId, 
 		return;
 	}
 
-	std::string realMemberProfessionSkillTemplate = memberProfessionSkillTemplate;
-	int realMemberLevel = memberLevel;
-	if (realMemberProfessionSkillTemplate.empty() || (realMemberLevel <= 0))
-	{
-		if (existingGmi)
-		{
-			realMemberProfessionSkillTemplate = existingGmi->m_professionSkillTemplate;
-			realMemberLevel = existingGmi->m_level;
-		}
-		else
-		{
-			if (!so)
-				so = ServerWorld::findObjectByNetworkId(memberId);
-
-			if (so)
-			{
-				CreatureObject const * const co = so->asCreatureObject();
-				if (co)
-				{
-					realMemberLevel = co->getLevel();
-
-					PlayerObject const * const player = PlayerCreatureController::getPlayerObject(co);
-					if (player)
-						realMemberProfessionSkillTemplate = player->getSkillTemplate();
-				}
-			}
-		}
-	}
+	std::string const realMemberProfessionSkillTemplate;
+	int const realMemberLevel = 0;
 
 	if (!isAuthoritative())
 	{
@@ -1254,6 +1206,10 @@ void GuildObject::setGuildMemberNameAndPermision(int guildId, NetworkId const &m
 
 void GuildObject::setGuildMemberProfessionInfo(int guildId, NetworkId const &memberId, std::string const &memberProfessionSkillTemplate, int memberLevel)
 {
+	UNREF(memberProfessionSkillTemplate);
+	UNREF(memberLevel);
+	std::string const precuMemberProfessionSkillTemplate;
+	int const precuMemberLevel = 0;
 	GuildMemberInfo const * const gmi = getGuildMemberInfo(guildId, memberId);
 	if (gmi)
 	{
@@ -1265,24 +1221,24 @@ void GuildObject::setGuildMemberProfessionInfo(int guildId, NetworkId const &mem
 				controller->appendMessage(
 					CM_guildSetMemberProfessionInfo,
 					0.0f,
-					new MessageQueueGenericValueType<std::pair<std::pair<int, NetworkId>, std::pair<std::string, int> > >(std::make_pair(std::make_pair(guildId, memberId), std::make_pair(memberProfessionSkillTemplate, memberLevel))),
+					new MessageQueueGenericValueType<std::pair<std::pair<int, NetworkId>, std::pair<std::string, int> > >(std::make_pair(std::make_pair(guildId, memberId), std::make_pair(precuMemberProfessionSkillTemplate, precuMemberLevel))),
 					GameControllerMessageFlags::SEND |
 					GameControllerMessageFlags::RELIABLE |
 					GameControllerMessageFlags::DEST_AUTH_SERVER);
 			}
 		}
-		else if ((gmi->m_professionSkillTemplate != memberProfessionSkillTemplate) || (gmi->m_level != memberLevel))
+		else if ((gmi->m_professionSkillTemplate != precuMemberProfessionSkillTemplate) || (gmi->m_level != precuMemberLevel))
 		{			
 			std::string memberSpec;
 			GuildStringParser::buildMemberSpec(guildId, memberId, gmi->m_name, gmi->m_professionSkillTemplate, gmi->m_level, gmi->m_permissions, gmi->m_rank, gmi->m_title, gmi->m_allegiance, memberSpec);
 			m_members.erase(memberSpec);
 
-			GuildStringParser::buildMemberSpec(guildId, memberId, gmi->m_name, memberProfessionSkillTemplate, memberLevel, gmi->m_permissions, gmi->m_rank, gmi->m_title, gmi->m_allegiance, memberSpec);
+			GuildStringParser::buildMemberSpec(guildId, memberId, gmi->m_name, precuMemberProfessionSkillTemplate, precuMemberLevel, gmi->m_permissions, gmi->m_rank, gmi->m_title, gmi->m_allegiance, memberSpec);
 			m_members.insert(memberSpec);
 
 			GuildMemberInfo updatedGmi(gmi);
-			updatedGmi.m_professionSkillTemplate = memberProfessionSkillTemplate;
-			updatedGmi.m_level = memberLevel;
+			updatedGmi.m_professionSkillTemplate = precuMemberProfessionSkillTemplate;
+			updatedGmi.m_level = precuMemberLevel;
 			m_membersInfo.set(std::make_pair(guildId, memberId), updatedGmi);
 		}
 	}

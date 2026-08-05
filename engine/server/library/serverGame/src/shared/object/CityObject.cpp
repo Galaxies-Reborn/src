@@ -1379,7 +1379,7 @@ void CityObject::setCitizen(int cityId, NetworkId const &citizenId, std::string 
 		std::string oldCitizenSpec, newCitizenSpec;
 		CitizenInfo const * existingInfo = getCitizenSpec(cityId, citizenId, oldCitizenSpec);
 
-		CityStringParser::buildCitizenSpec(cityId, citizenId, citizenName, (existingInfo ? existingInfo->m_citizenProfessionSkillTemplate : std::string()), (existingInfo ? existingInfo->m_citizenLevel : 0), permissions, (existingInfo ? existingInfo->m_citizenRank : BitArray()), (existingInfo ? existingInfo->m_citizenTitle : std::string()), allegiance, newCitizenSpec);
+		CityStringParser::buildCitizenSpec(cityId, citizenId, citizenName, std::string(), 0, permissions, (existingInfo ? existingInfo->m_citizenRank : BitArray()), (existingInfo ? existingInfo->m_citizenTitle : std::string()), allegiance, newCitizenSpec);
 		if (oldCitizenSpec != newCitizenSpec)
 			setCitizen(oldCitizenSpec, newCitizenSpec);
 
@@ -1440,8 +1440,8 @@ void CityObject::setCitizen(int cityId, NetworkId const &citizenId, std::string 
 
 		CitizenInfo updatedInfo;
 		updatedInfo.m_citizenName = citizenName;
-		updatedInfo.m_citizenProfessionSkillTemplate = (existingInfo ? existingInfo->m_citizenProfessionSkillTemplate : std::string());
-		updatedInfo.m_citizenLevel = (existingInfo ? existingInfo->m_citizenLevel : 0);
+		updatedInfo.m_citizenProfessionSkillTemplate.clear();
+		updatedInfo.m_citizenLevel = 0;
 		updatedInfo.m_citizenPermissions = permissions;
 		updatedInfo.m_citizenRank = (existingInfo ? existingInfo->m_citizenRank : BitArray());
 		updatedInfo.m_citizenTitle = (existingInfo ? existingInfo->m_citizenTitle : std::string());
@@ -1455,6 +1455,10 @@ void CityObject::setCitizen(int cityId, NetworkId const &citizenId, std::string 
 
 void CityObject::setCitizenProfessionInfo(int cityId, NetworkId const &citizenId, std::string const &citizenProfessionSkillTemplate, int citizenLevel)
 {
+	UNREF(citizenProfessionSkillTemplate);
+	UNREF(citizenLevel);
+	std::string const precuCitizenProfessionSkillTemplate;
+	int const precuCitizenLevel = 0;
 	if (!isAuthoritative())
 	{
 		Controller *controller = getController();
@@ -1463,7 +1467,7 @@ void CityObject::setCitizenProfessionInfo(int cityId, NetworkId const &citizenId
 			controller->appendMessage(
 				CM_citySetCitizenProfessionInfo,
 				0.0f,
-				new MessageQueueGenericValueType<std::pair<std::pair<int, NetworkId>, std::pair<std::string, int> > >(std::make_pair(std::make_pair(cityId, citizenId), std::make_pair(citizenProfessionSkillTemplate, citizenLevel))),
+				new MessageQueueGenericValueType<std::pair<std::pair<int, NetworkId>, std::pair<std::string, int> > >(std::make_pair(std::make_pair(cityId, citizenId), std::make_pair(precuCitizenProfessionSkillTemplate, precuCitizenLevel))),
 				GameControllerMessageFlags::SEND |
 				GameControllerMessageFlags::RELIABLE |
 				GameControllerMessageFlags::DEST_AUTH_SERVER);
@@ -1476,13 +1480,13 @@ void CityObject::setCitizenProfessionInfo(int cityId, NetworkId const &citizenId
 		{
 			std::string oldCitizenSpec, newCitizenSpec;
 			CityStringParser::buildCitizenSpec(cityId, citizenId, info->m_citizenName, info->m_citizenProfessionSkillTemplate, info->m_citizenLevel, info->m_citizenPermissions, info->m_citizenRank, info->m_citizenTitle, info->m_citizenAllegiance, oldCitizenSpec);
-			CityStringParser::buildCitizenSpec(cityId, citizenId, info->m_citizenName, citizenProfessionSkillTemplate, citizenLevel, info->m_citizenPermissions, info->m_citizenRank, info->m_citizenTitle, info->m_citizenAllegiance, newCitizenSpec);
+			CityStringParser::buildCitizenSpec(cityId, citizenId, info->m_citizenName, precuCitizenProfessionSkillTemplate, precuCitizenLevel, info->m_citizenPermissions, info->m_citizenRank, info->m_citizenTitle, info->m_citizenAllegiance, newCitizenSpec);
 			if (oldCitizenSpec != newCitizenSpec)
 				setCitizen(oldCitizenSpec, newCitizenSpec);
 
 			CitizenInfo updatedInfo = *info;
-			updatedInfo.m_citizenProfessionSkillTemplate = citizenProfessionSkillTemplate;
-			updatedInfo.m_citizenLevel = citizenLevel;
+			updatedInfo.m_citizenProfessionSkillTemplate = precuCitizenProfessionSkillTemplate;
+			updatedInfo.m_citizenLevel = precuCitizenLevel;
 
 			m_citizensInfo.set(std::make_pair(cityId, citizenId), updatedInfo);
 		}
