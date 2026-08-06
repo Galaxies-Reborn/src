@@ -830,6 +830,7 @@ private:
 	int getExpertiseRankForPlayer(std::string const & expertiseName);
 	int getRemainingExpertisePoints() const;
 	void clearRetiredNgeProgressionSkills();
+	void clearRetiredNgeProgressionExperience();
 
 	mutable CommandQueue * m_commandQueue;
 	Archive::AutoDeltaVariable<bool>                 m_isStatic;

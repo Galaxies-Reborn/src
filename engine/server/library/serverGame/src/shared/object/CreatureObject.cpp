@@ -254,6 +254,11 @@ namespace CreatureObjectNamespace
 			skillName.find("internal_expertise_") == 0;
 	}
 
+	bool isRetiredNgeProgressionExperienceType(std::string const & experienceType)
+	{
+		return experienceType == "chronicles";
+	}
+
 	bool isRetiredNgeProgressionCommandName(std::string const & commandName)
 	{
 		return commandName == "bm_collect_dna" ||
@@ -3678,6 +3683,13 @@ const int CreatureObject::grantExperiencePoints(const std::string & experienceTy
 {
 	if (isPlayerControlled())
 	{
+		if (amount > 0 && isRetiredNgeProgressionExperienceType(experienceType))
+		{
+			LOG("PreCuRestore", ("Rejected retired NGE progression experience %s for player %s",
+				experienceType.c_str(), getNetworkId().getValueString().c_str()));
+			return 0;
+		}
+
 		PlayerObject * const playerObject = PlayerCreatureController::getPlayerObject(this);
 		if (playerObject != nullptr)
 		{
@@ -7688,6 +7700,7 @@ void CreatureObject::onClientAboutToLoad()
 	if (isAuthoritative())
 	{
 		clearRetiredNgeProgressionSkills();
+		clearRetiredNgeProgressionExperience();
 		setInvulnerabilityTimer(ConfigServerGame::getCreatureLoadInvulnerableTimeWithoutClient());
 	}
 
@@ -7718,6 +7731,23 @@ void CreatureObject::clearRetiredNgeProgressionSkills()
 		// rebuilds commands, modifiers, schematics, and level from this clean set.
 		LOG("PreCuRestore", ("Retired %u persisted NGE progression skill(s) while loading player %s",
 			static_cast<unsigned int>(skillsToRetire.size()), getNetworkId().getValueString().c_str()));
+	}
+}
+
+// ----------------------------------------------------------------------
+
+void CreatureObject::clearRetiredNgeProgressionExperience()
+{
+	if (!isAuthoritative() || !isPlayerControlled())
+		return;
+
+	char const * const chroniclesExperience = "chronicles";
+	int const persistedExperience = getExperiencePoints(chroniclesExperience);
+	if (persistedExperience > 0)
+	{
+		int const removedExperience = grantExperiencePoints(chroniclesExperience, -persistedExperience);
+		LOG("PreCuRestore", ("Retired %d persisted NGE Chronicles experience while loading player %s",
+			-removedExperience, getNetworkId().getValueString().c_str()));
 	}
 }
 
