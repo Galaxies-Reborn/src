@@ -264,7 +264,8 @@ namespace CreatureObjectNamespace
 			commandName == "en_harvest_faire_buff_package" ||
 			commandName == "en_healer_buff_package" ||
 			commandName == "en_second_chance_buff_package" ||
-			commandName == "fs_taunt";
+			commandName == "fs_taunt" ||
+			commandName == "veteranPlayerBuff";
 	}
 
 	int getPreCuPlayerCombatDifficulty(CreatureObject const & player)
