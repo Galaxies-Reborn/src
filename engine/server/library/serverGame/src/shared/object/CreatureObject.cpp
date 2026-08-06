@@ -265,6 +265,13 @@ namespace CreatureObjectNamespace
 			commandName == "en_healer_buff_package" ||
 			commandName == "en_second_chance_buff_package" ||
 			commandName == "fs_taunt" ||
+			commandName == "cyborgStrengthBuff" ||
+			commandName == "cyborgLightning" ||
+			commandName == "cyborgBurstRun" ||
+			commandName == "cyborgRevive" ||
+			commandName == "cyborgSureShot" ||
+			commandName == "cyborgCriticalSnipe" ||
+			commandName == "cyborgKickDown" ||
 			commandName == "veteranPlayerBuff";
 	}
 
