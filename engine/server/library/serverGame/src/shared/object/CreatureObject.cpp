@@ -254,6 +254,19 @@ namespace CreatureObjectNamespace
 			skillName.find("internal_expertise_") == 0;
 	}
 
+	bool isRetiredNgeProgressionCommandName(std::string const & commandName)
+	{
+		return commandName == "bm_collect_dna" ||
+			commandName == "bountycheck" ||
+			commandName == "chroniclerVentriloquism" ||
+			commandName == "en_flush_with_success_buff_package" ||
+			commandName == "en_go_with_the_flow_buff_package" ||
+			commandName == "en_harvest_faire_buff_package" ||
+			commandName == "en_healer_buff_package" ||
+			commandName == "en_second_chance_buff_package" ||
+			commandName == "fs_taunt";
+	}
+
 	int getPreCuPlayerCombatDifficulty(CreatureObject const & player)
 	{
 		WeaponObject const * const weapon = player.getReadiedWeapon();
@@ -7824,6 +7837,19 @@ void CreatureObject::doWarmupChecks(Command const &command, NetworkId const &tar
 		}
 		status = Command::CEC_Locomotion;
 		statusDetail = static_cast<int>(getLocomotion());
+	}
+	else if (isPlayerControlled() && CreatureObjectNamespace::isRetiredNgeProgressionCommandName(command.m_commandName))
+	{
+		if (ConfigServerGame::getLogAllCommands())
+		{
+			LOG(
+				"Command",
+				("%s>%s %s ignored as a retired NGE progression command",
+					getNetworkId().getValueString().c_str(),
+					targetId.getValueString().c_str(),
+					command.m_commandName.c_str()));
+		}
+		status = Command::CEC_Ability;
 	}
 	else if (isPlayerControlled() && command.m_characterAbility.size() && !hasCommand(command.m_characterAbility))
 	{
