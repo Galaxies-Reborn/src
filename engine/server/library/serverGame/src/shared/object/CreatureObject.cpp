@@ -7701,6 +7701,7 @@ void CreatureObject::onClientAboutToLoad()
 	{
 		clearRetiredNgeProgressionSkills();
 		clearRetiredNgeProgressionExperience();
+		clearRetiredNgeProgressionCommands();
 		setInvulnerabilityTimer(ConfigServerGame::getCreatureLoadInvulnerableTimeWithoutClient());
 	}
 
@@ -7748,6 +7749,34 @@ void CreatureObject::clearRetiredNgeProgressionExperience()
 		int const removedExperience = grantExperiencePoints(chroniclesExperience, -persistedExperience);
 		LOG("PreCuRestore", ("Retired %d persisted NGE Chronicles experience while loading player %s",
 			-removedExperience, getNetworkId().getValueString().c_str()));
+	}
+}
+
+// ----------------------------------------------------------------------
+
+void CreatureObject::clearRetiredNgeProgressionCommands()
+{
+	if (!isAuthoritative() || !isPlayerControlled())
+		return;
+
+	std::vector<std::string> commandsToRetire;
+	DynamicVariableList::NestedList commands(getObjVars(), OBJVAR_NOT_SKILL_COMMANDS);
+	for (DynamicVariableList::NestedList::const_iterator iter = commands.begin(); iter != commands.end(); ++iter)
+	{
+		if (CreatureObjectNamespace::isRetiredNgeProgressionCommandName(iter.getName()))
+			commandsToRetire.push_back(iter.getName());
+	}
+
+	for (std::vector<std::string>::const_iterator iter = commandsToRetire.begin(); iter != commandsToRetire.end(); ++iter)
+	{
+		revokeCommand(*iter, false, true);
+		removeObjVarItem(OBJVAR_NOT_SKILL_COMMANDS + "." + *iter);
+	}
+
+	if (!commandsToRetire.empty())
+	{
+		LOG("PreCuRestore", ("Retired %u persisted NGE progression command(s) while loading player %s",
+			static_cast<unsigned int>(commandsToRetire.size()), getNetworkId().getValueString().c_str()));
 	}
 }
 
@@ -14490,6 +14519,9 @@ std::map<std::string, int> const & CreatureObject::getCommandList() const
 */
 bool CreatureObject::grantCommand(std::string const & commandName, bool const fromSkill)
 {
+	if (isPlayerControlled() && CreatureObjectNamespace::isRetiredNgeProgressionCommandName(commandName))
+		return false;
+
 	bool result = false;
 	if(isAuthoritative())
 	{

@@ -831,6 +831,7 @@ private:
 	int getRemainingExpertisePoints() const;
 	void clearRetiredNgeProgressionSkills();
 	void clearRetiredNgeProgressionExperience();
+	void clearRetiredNgeProgressionCommands();
 
 	mutable CommandQueue * m_commandQueue;
 	Archive::AutoDeltaVariable<bool>                 m_isStatic;
