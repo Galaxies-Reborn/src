@@ -57,8 +57,17 @@ bool CentralCommandParserGame::performParsing (const NetworkId &, const StringVe
 				std::string scriptName = Unicode::wideToNarrow(argv[3]);
 				std::string methodName = Unicode::wideToNarrow(argv[4]);
 
-				// determine params
-				Unicode::String strParam = originalMessage.substr(originalMessage.find(argv[4]) + argv[4].length() + 1);
+				// The command was parsed once by CentralServer before it was
+				// forwarded here. Rebuild the single script parameter from the
+				// forwarded token vector instead of depending on the parser-specific
+				// shape of originalMessage.
+				Unicode::String strParam;
+				for(unsigned int i = 5; i < argv.size(); ++i)
+				{
+					if(! strParam.empty())
+						strParam += Unicode::narrowToWide(" ");
+					strParam += argv[i];
+				}
 				ScriptParams params;
 				params.addParam(strParam, "strParam");
 				std::string scriptResult = GameScriptObject::callScriptConsoleHandler(scriptName, methodName, "u", params);
@@ -272,4 +281,3 @@ bool CentralCommandParserGame::performParsing (const NetworkId &, const StringVe
 }
 
 //-----------------------------------------------------------------------
-
