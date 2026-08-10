@@ -57,7 +57,7 @@ void JediManagerController::handleMessage (const int message, const float value,
 							   msg->getScene(),
 				               msg->getVisibility(),
 							   msg->getBountyValue(),
-							   msg->getLevel(),
+							   0,
 				               msg->getHoursAlive(),
 							   msg->getState(),
 							   msg->getSpentJediSkillPoints(),
@@ -74,7 +74,7 @@ void JediManagerController::handleMessage (const int message, const float value,
 				owner->updateJedi(msg->getId(), 
 				                  msg->getVisibility(),
 								  msg->getBountyValue(),
-								  msg->getLevel(),
+								  0,
 				                  msg->getHoursAlive()
 				                 );
 			}

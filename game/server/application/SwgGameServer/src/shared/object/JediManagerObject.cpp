@@ -198,6 +198,8 @@ void JediManagerObject::addJedi(const NetworkId & id, const Unicode::String & na
 	const Vector & location, const std::string & scene, int visibility, int bountyValue, 
 	int level, int hoursAlive, int state, int spentJediSkillPoints, int faction)
 {
+	UNREF(level);
+	int const preCuPlayerLevel = 0;
 	WARNING_DEBUG_FATAL(!isInitialized(), ("JediManagerObject::addJedi when not "
 		"initialized"));
 
@@ -221,7 +223,7 @@ void JediManagerObject::addJedi(const NetworkId & id, const Unicode::String & na
 					m_jediScene.push_back(scene);
 					m_jediVisibility.push_back(visibility);
 					m_jediBountyValue.push_back(bountyValue);
-					m_jediLevel.push_back(level);
+					m_jediLevel.push_back(preCuPlayerLevel);
 					m_jediBounties.push_back(std::vector<NetworkId>());
 					m_jediHoursAlive.push_back(hoursAlive);
 					m_jediState.push_back(state);
@@ -241,7 +243,7 @@ void JediManagerObject::addJedi(const NetworkId & id, const Unicode::String & na
 					m_jediScene.set(hole, scene);
 					m_jediVisibility.set(hole, visibility);
 					m_jediBountyValue.set(hole, bountyValue);
-					m_jediLevel.set(hole, level);
+					m_jediLevel.set(hole, preCuPlayerLevel);
 					m_jediBounties.set(hole, std::vector<NetworkId>());
 					m_jediHoursAlive.set(hole, hoursAlive);
 					m_jediState.set(hole, state);
@@ -280,7 +282,7 @@ void JediManagerObject::addJedi(const NetworkId & id, const Unicode::String & na
 				m_jediScene.set(index, scene);
 				m_jediVisibility.set(index, visibility);
 				m_jediBountyValue.set(index, bountyValue);
-				m_jediLevel.set(index,level);
+				m_jediLevel.set(index, preCuPlayerLevel);
 				m_jediState.set(index, state);
 				m_jediOnline.set(index, 1);
 				m_jediSpentJediSkillPoints.set(index, spentJediSkillPoints);
@@ -298,7 +300,7 @@ void JediManagerObject::addJedi(const NetworkId & id, const Unicode::String & na
 	{
 		sendControllerMessageToAuthServer(CM_addJedi,
 			new MessageQueueJediData(id, name, location, scene, visibility, bountyValue, 
-			level, hoursAlive, state, spentJediSkillPoints, faction));
+			preCuPlayerLevel, hoursAlive, state, spentJediSkillPoints, faction));
 	}
 	
 	// in theory this should happen automatically via the auto delta code or when
@@ -496,6 +498,7 @@ void JediManagerObject::characterBeingDeleted(const NetworkId & id)
 void JediManagerObject::updateJedi(const NetworkId & id, int visibility,
 	int bountyValue, int level, int hoursAlive)
 {
+	UNREF(level);
 	WARNING_DEBUG_FATAL(!isInitialized(), ("JediManagerObject::updateJedi(1) "
 		"when not initialized"));
 
@@ -517,11 +520,11 @@ void JediManagerObject::updateJedi(const NetworkId & id, int visibility,
 					PlayerObject::getAccountDescription(id).c_str(), bountyValue));
 				m_jediBountyValue.set(index, bountyValue);
 			}
-			if (level >= 0 && level != m_jediLevel.get(index))
+			if (m_jediLevel.get(index) != 0)
 			{
-				LOG("CustomerService", ("Jedi: Setting Jedi %s level to %d",
-					PlayerObject::getAccountDescription(id).c_str(), level));
-				m_jediLevel.set(index, level);
+				LOG("CustomerService", ("Jedi: Clearing retired combat level for Jedi %s",
+					PlayerObject::getAccountDescription(id).c_str()));
+				m_jediLevel.set(index, 0);
 			}
 			if (hoursAlive >= 0 && hoursAlive != m_jediHoursAlive.get(index))
 			{
@@ -539,7 +542,7 @@ void JediManagerObject::updateJedi(const NetworkId & id, int visibility,
 	else
 	{
 		sendControllerMessageToAuthServer(CM_updateJedi, new MessageQueueJediData(
-			id, Unicode::emptyString, Vector(), "", visibility, bountyValue, level, hoursAlive,
+			id, Unicode::emptyString, Vector(), "", visibility, bountyValue, 0, hoursAlive,
 			0, 0, 0));
 	}
 
@@ -901,6 +904,10 @@ void JediManagerObject::removeJediScriptData(const NetworkId & id, const std::st
 void JediManagerObject::getJedi(int visibility, int bountyValue, int minLevel, int maxLevel, 
 	int hoursAlive, int bounties, int state, ScriptParams & returnParams) const
 {
+	// Publish 14.1 player bounties are selected by Bounty Hunter Investigation III,
+	// target visibility, availability, and bounty state, never combat-level bands.
+	UNREF(minLevel);
+	UNREF(maxLevel);
 	// unfortunately we have to create new data to store the Jedi info,
 	// since the ScriptParams class wasn't set up to be passed as a return
 	// value like we're using it.
@@ -951,8 +958,6 @@ void JediManagerObject::getJedi(int visibility, int bountyValue, int minLevel, i
 			else if (bountyValue < 0 && m_jediBountyValue[i->second] >= -bountyValue)
 				continue;
 		}
-		if ((m_jediLevel[i->second] <= 0) || (m_jediLevel[i->second] < minLevel) || (m_jediLevel[i->second] > maxLevel))
-			continue;
 		if (hoursAlive != IGNORE_JEDI_STAT)
 		{
 			if (hoursAlive >= 0 && m_jediHoursAlive[i->second] < hoursAlive)
@@ -981,7 +986,7 @@ void JediManagerObject::getJedi(int visibility, int bountyValue, int minLevel, i
 		jediScene->push_back(scene);
 		jediVisibility->push_back(m_jediVisibility[i->second]);
 		jediBountyValue->push_back(m_jediBountyValue[i->second]);
-		jediLevel->push_back(m_jediLevel[i->second]);
+		jediLevel->push_back(0);
 		jediBounties->push_back(new std::vector<NetworkId>(m_jediBounties[i->second]));
 		jediHoursAlive->push_back(m_jediHoursAlive[i->second]);
 		jediState->push_back(m_jediState[i->second]);
@@ -1054,7 +1059,7 @@ void JediManagerObject::getJedi(const NetworkId & id, ScriptParams & returnParam
 	returnParams.addParam(m_jediScene[index].c_str(), "scene");
 	returnParams.addParam(m_jediVisibility[index], "visibility");
 	returnParams.addParam(m_jediBountyValue[index], "bountyValue");
-	returnParams.addParam(m_jediLevel[index], "level");
+	returnParams.addParam(0, "level");
 	returnParams.addParam(m_jediBounties[index], "bounties");
 	returnParams.addParam(m_jediHoursAlive[index], "hoursAlive");
 	returnParams.addParam(m_jediState[index], "state");

@@ -280,7 +280,7 @@ void SwgCreatureObject::endBaselines()
 				{
 					jediManager->addJedi(getNetworkId(), getObjectName(),
 						getPosition_w(), getSceneId(), player->getJediVisibility(),
-						bountyValue, getLevel(),
+						bountyValue, 0,
 						0, player->getJediState(), getSpentJediSkillPoints(), getPvpFaction());
 				}
 			}
@@ -315,7 +315,7 @@ void SwgCreatureObject::levelChanged() const
 		JediManagerObject * jediManager = static_cast<SwgServerUniverse &>(ServerUniverse::getInstance()).getJediManager();
 		if (jediManager)
 		{
-			jediManager->updateJedi(getNetworkId(), -1, -1, getLevel(), -1);
+			jediManager->updateJedi(getNetworkId(), -1, -1, 0, -1);
 		}
 	}
 }

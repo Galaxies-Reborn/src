@@ -608,7 +608,7 @@ jboolean JNICALL ScriptMethodsJediNamespace::setJediBountyValue(JNIEnv * env, jo
 
 	jediManager->addJedi(creature->getNetworkId(), creature->getObjectName(),
 		creature->getPosition_w(), creature->getSceneId(), jediPlayer->getJediVisibility(),
-		bountyValue, creature->getLevel(),
+		bountyValue, 0,
 		0, jediPlayer->getJediState(), jediCreature->getSpentJediSkillPoints(), creature->getPvpFaction());
 
 	return JNI_TRUE;
@@ -939,5 +939,4 @@ void JNICALL ScriptMethodsJediNamespace::removeJediScriptData(JNIEnv * env, jobj
 
 	jediManager->removeJediScriptData(targetId, dataName);
 }	// JavaLibrary::removeJediScriptData
-
 
