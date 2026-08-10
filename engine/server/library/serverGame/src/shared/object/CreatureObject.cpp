@@ -280,6 +280,14 @@ namespace CreatureObjectNamespace
 			commandName == "veteranPlayerBuff";
 	}
 
+	bool isPreCuSkillOnlyCommandName(std::string const & commandName)
+	{
+		// Publish 14.1 grants meditate with combat_unarmed_novice.  Retained
+		// later content may reference the command, but must not create an
+		// independent quest/item/collection copy that survives skill revocation.
+		return commandName == "meditate";
+	}
+
 	int getPreCuPlayerCombatDifficulty(CreatureObject const & player)
 	{
 		WeaponObject const * const weapon = player.getReadiedWeapon();
@@ -7760,11 +7768,14 @@ void CreatureObject::clearRetiredNgeProgressionCommands()
 		return;
 
 	std::vector<std::string> commandsToRetire;
+	std::vector<std::string> skillOnlyCommandsToRetire;
 	DynamicVariableList::NestedList commands(getObjVars(), OBJVAR_NOT_SKILL_COMMANDS);
 	for (DynamicVariableList::NestedList::const_iterator iter = commands.begin(); iter != commands.end(); ++iter)
 	{
 		if (CreatureObjectNamespace::isRetiredNgeProgressionCommandName(iter.getName()))
 			commandsToRetire.push_back(iter.getName());
+		else if (CreatureObjectNamespace::isPreCuSkillOnlyCommandName(iter.getName()))
+			skillOnlyCommandsToRetire.push_back(iter.getName());
 	}
 
 	for (std::vector<std::string>::const_iterator iter = commandsToRetire.begin(); iter != commandsToRetire.end(); ++iter)
@@ -7773,10 +7784,24 @@ void CreatureObject::clearRetiredNgeProgressionCommands()
 		removeObjVarItem(OBJVAR_NOT_SKILL_COMMANDS + "." + *iter);
 	}
 
+	for (std::vector<std::string>::const_iterator iter = skillOnlyCommandsToRetire.begin(); iter != skillOnlyCommandsToRetire.end(); ++iter)
+	{
+		// Skill commands were loaded before persisted non-skill commands.  Drop
+		// exactly the non-skill reference, then remove its persistence marker.
+		revokeCommand(*iter, false, false);
+		removeObjVarItem(OBJVAR_NOT_SKILL_COMMANDS + "." + *iter);
+	}
+
 	if (!commandsToRetire.empty())
 	{
 		LOG("PreCuRestore", ("Retired %u persisted NGE progression command(s) while loading player %s",
 			static_cast<unsigned int>(commandsToRetire.size()), getNetworkId().getValueString().c_str()));
+	}
+
+	if (!skillOnlyCommandsToRetire.empty())
+	{
+		LOG("PreCuRestore", ("Retired %u persisted non-skill PRE-CU command copy/copies while loading player %s",
+			static_cast<unsigned int>(skillOnlyCommandsToRetire.size()), getNetworkId().getValueString().c_str()));
 	}
 }
 
@@ -14519,7 +14544,9 @@ std::map<std::string, int> const & CreatureObject::getCommandList() const
 */
 bool CreatureObject::grantCommand(std::string const & commandName, bool const fromSkill)
 {
-	if (isPlayerControlled() && CreatureObjectNamespace::isRetiredNgeProgressionCommandName(commandName))
+	if (isPlayerControlled() &&
+		(CreatureObjectNamespace::isRetiredNgeProgressionCommandName(commandName) ||
+		(!fromSkill && CreatureObjectNamespace::isPreCuSkillOnlyCommandName(commandName))))
 		return false;
 
 	bool result = false;
