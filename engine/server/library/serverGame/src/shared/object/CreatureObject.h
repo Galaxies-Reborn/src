@@ -759,6 +759,8 @@ private:
 	void     packWearables();
 	void     computeTotalAttributes ();
 	void     migrateSixAttributeStateToNine();
+	bool     recomputePreCuArmorEncumbrances();
+	int      getPreCuArmorEncumbrance(Attributes::Enumerator attribute) const;
 
 	bool     potentiallyAddToTerrain();
 
@@ -844,6 +846,7 @@ private:
 	float                                            m_regeneration[Attributes::NumberOfAttributes];   ///< Accumulated regeneration points
 	float                                            m_regenerationTime;                               ///< Accumulated regeneration time
 	float                                            m_regenerationOverride[3];                        ///< Explicit script overrides by primary pool; negative selects the Publish 14 stat formula.
+	std::vector<int>                                 m_preCuArmorEncumbrances;                         ///< Derived equipped-armor Health, Action, and Mind group costs; never persisted.
 	
 	// BPM CreatureObject : TangibleObject // Begin persisted members.
 	Archive::AutoDeltaVector<Attributes::Value>      m_attributes;           ///< The current attributes (health, action, mind) of the mobile.

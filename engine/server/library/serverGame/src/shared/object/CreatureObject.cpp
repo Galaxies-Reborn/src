@@ -246,6 +246,22 @@ const static std::string CREATURES_TABLE("datatables/mob/creatures.iff");
 
 namespace CreatureObjectNamespace
 {
+	int subtractSaturated(int value, int amount)
+	{
+		if (amount <= 0)
+			return value;
+
+		int64 const result = static_cast<int64>(value) - static_cast<int64>(amount);
+		if (result < static_cast<int64>(std::numeric_limits<int>::min()))
+			return std::numeric_limits<int>::min();
+		return static_cast<int>(result);
+	}
+
+	bool isArmorObject(TangibleObject const & item)
+	{
+		return GameObjectTypes::isTypeOf(item.getGameObjectType(), SharedObjectTemplate::GOT_armor);
+	}
+
 	bool isRetiredNgeProgressionSkillName(std::string const & skillName)
 	{
 		return skillName.find("class_") == 0 ||
@@ -716,6 +732,7 @@ CreatureObject::CreatureObject(const ServerCreatureObjectTemplate* newTemplate) 
 	m_isStatic(false),
 	m_shield(nullptr),
 	m_regenerationTime(0),
+	m_preCuArmorEncumbrances(3, 0),
 	m_attributes(Attributes::NumberOfAttributes),
 	m_maxAttributes(Attributes::NumberOfAttributes),
 	m_wounds(Attributes::NumberOfAttributes),
@@ -2182,6 +2199,9 @@ void CreatureObject::onLoadedFromDatabase()
 	if (isAuthoritative())
 	{
 		// note: this MUST come after TangibleObject::onLoadedFromDatabase() is called
+		if (recomputePreCuArmorEncumbrances())
+			computeTotalAttributes();
+
 		float defaultAlterTime = 0;
 		if (!isPlayerControlled())
 			defaultAlterTime = AlterResult::cms_alterQuickly;
@@ -2822,6 +2842,7 @@ void CreatureObject::setAuthority()
  	// authoritative
 	++m_deferComputeTotalAttributes;
 	TangibleObject::setAuthority();
+	IGNORE_RETURN(recomputePreCuArmorEncumbrances());
 	--m_deferComputeTotalAttributes;
 	computeTotalAttributes();
 }
@@ -3182,6 +3203,85 @@ WeaponObject *CreatureObject::getDefaultWeapon() const
  *
  * @param attribute		the attribute to get
  */
+int CreatureObject::getPreCuArmorEncumbrance(Attributes::Enumerator attribute) const
+{
+	if (!isPlayerControlled())
+		return 0;
+
+	int group = -1;
+	switch (attribute)
+	{
+	case Attributes::Strength:
+	case Attributes::Constitution:
+		group = 0;
+		break;
+	case Attributes::Quickness:
+	case Attributes::Stamina:
+		group = 1;
+		break;
+	case Attributes::Focus:
+	case Attributes::Willpower:
+		group = 2;
+		break;
+	default:
+		return 0;
+	}
+
+	if (m_preCuArmorEncumbrances.size() != 3)
+		return std::numeric_limits<int>::max();
+	return m_preCuArmorEncumbrances[static_cast<size_t>(group)];
+}
+
+//----------------------------------------------------------------------
+
+bool CreatureObject::recomputePreCuArmorEncumbrances()
+{
+	if (!isAuthoritative() || !isPlayerControlled())
+		return false;
+
+	std::vector<int64> totals(3, 0);
+	Container const * const equipment = ContainerInterface::getContainer(*this);
+	if (equipment != nullptr)
+	{
+		for (ContainerConstIterator iterator(equipment->begin()); iterator != equipment->end(); ++iterator)
+		{
+			ServerObject const * const serverObject = safe_cast<ServerObject const *>((*iterator).getObject());
+			TangibleObject const * const item = serverObject != nullptr ? serverObject->asTangibleObject() : nullptr;
+			if (item == nullptr || !isArmorObject(*item))
+				continue;
+
+			std::vector<int> encumbrances;
+			if (!item->getEncumbrances(encumbrances) || encumbrances.size() != 3)
+				continue;
+
+			for (size_t group = 0; group < 3; ++group)
+			{
+				int const value = std::max(0, encumbrances[group]);
+				int64 const maximum = static_cast<int64>(std::numeric_limits<int>::max());
+				totals[group] = std::min(maximum, totals[group] + static_cast<int64>(value));
+			}
+		}
+	}
+
+	bool changed = m_preCuArmorEncumbrances.size() != 3;
+	if (changed)
+		m_preCuArmorEncumbrances.assign(3, 0);
+
+	for (size_t group = 0; group < 3; ++group)
+	{
+		int const value = static_cast<int>(totals[group]);
+		if (m_preCuArmorEncumbrances[group] != value)
+		{
+			m_preCuArmorEncumbrances[group] = value;
+			changed = true;
+		}
+	}
+
+	return changed;
+}
+
+//----------------------------------------------------------------------
+
 Attributes::Value CreatureObject::getAttribute(Attributes::Enumerator attribute) const
 {
 	if (attribute < 0 || attribute >= Attributes::NumberOfAttributes)
@@ -3216,7 +3316,10 @@ Attributes::Value CreatureObject::getAdjustedAttribute(Attributes::Enumerator at
 	value = static_cast<Attributes::Value>(
 		value + m_cachedCurrentAttributeModValues[attribute]);
 	if (!Attributes::isAttribPool(attribute))
-		value = static_cast<Attributes::Value>(value - m_wounds[attribute]);
+	{
+		value = subtractSaturated(value, m_wounds[attribute]);
+		value = subtractSaturated(value, getPreCuArmorEncumbrance(attribute));
+	}
 
 	// modify for partial regeneration
 	value = static_cast<Attributes::Value>(value + static_cast<int>(floor(m_regeneration[attribute])));
@@ -3248,6 +3351,7 @@ Attributes::Value CreatureObject::getMaxAttribute(Attributes::Enumerator attribu
 	value = static_cast<Attributes::Value>(
 		value + m_cachedMaxAttributeModValues[attribute] +
 		m_attribBonus[attribute] - m_wounds[attribute]);
+	value = subtractSaturated(value, getPreCuArmorEncumbrance(attribute));
 
 	if (capStat)
 	{
@@ -7068,6 +7172,31 @@ int CreatureObject::onContainerAboutToGainItem(ServerObject& item, ServerObject*
 			else
 				return Container::CEC_BlockedByDestinationContainer;
 		}
+
+		if (isAuthoritative() && isPlayerControlled() && isArmorObject(*object))
+		{
+			std::vector<int> encumbrances;
+			if (object->getEncumbrances(encumbrances) && encumbrances.size() == 3)
+			{
+				int const health = std::max(0, encumbrances[0]);
+				int const action = std::max(0, encumbrances[1]);
+				int const mind = std::max(0, encumbrances[2]);
+				bool const insufficient =
+					(health > 0 && (health >= getAttribute(Attributes::Strength) || health >= getAttribute(Attributes::Constitution))) ||
+					(action > 0 && (action >= getAttribute(Attributes::Quickness) || action >= getAttribute(Attributes::Stamina))) ||
+					(mind > 0 && (mind >= getAttribute(Attributes::Focus) || mind >= getAttribute(Attributes::Willpower)));
+				if (insufficient)
+				{
+					if (getClient() != nullptr)
+					{
+						Chat::sendSystemMessage(*this, StringId("system_msg", "equip_armor_fail"), Unicode::emptyString);
+						return Container::CEC_SilentError;
+					}
+
+					return Container::CEC_BlockedByDestinationContainer;
+				}
+			}
+		}
 	}
 
 
@@ -7148,6 +7277,8 @@ void CreatureObject::onContainerLostItem(ServerObject *destination, ServerObject
 	}
 
 	TangibleObject::onContainerLostItem(destination, item, transferer);
+	if (isAuthoritative() && recomputePreCuArmorEncumbrances())
+		computeTotalAttributes();
 }	// CreatureObject::onContainerLostItem
 
 //----------------------------------------------------------------------
@@ -7252,6 +7383,8 @@ void CreatureObject::onContainerGainItem(ServerObject& item, ServerObject* sourc
 	}
 
 	TangibleObject::onContainerGainItem(item, source, transferer);
+	if (isAuthoritative() && recomputePreCuArmorEncumbrances())
+		computeTotalAttributes();
 }
 
 // ----------------------------------------------------------------------

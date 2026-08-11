@@ -289,6 +289,9 @@ static const std::string OBJVAR_ARMOR_BASE =                          "armor";
 static const std::string OBJVAR_ARMOR_ENCUMBRANCE = "armorencumbrance";
 static const std::string OBJVAR_ENCUMBRANCE_SPLIT = "encumbranceSplit";
 static const std::string OBJVAR_ARMOR_LEVEL       = "armorLevel";
+static const std::string OBJVAR_PRECU_ARMOR_HEALTH_ENCUMBRANCE = "crafting_components.armor_health_encumbrance";
+static const std::string OBJVAR_PRECU_ARMOR_ACTION_ENCUMBRANCE = "crafting_components.armor_action_encumbrance";
+static const std::string OBJVAR_PRECU_ARMOR_MIND_ENCUMBRANCE   = "crafting_components.armor_mind_encumbrance";
 
 // objvar to flag the object as a shield
 static const std::string OBJVAR_ARMOR_SHIELD =                        "armor.isShield";
@@ -299,6 +302,48 @@ static const std::string DATATABLE_FINAL_ROW           = "final";
 static const std::string DATATABLE_TYPE_COL            = "type";
 static const std::string DATATABLE_MIN_ENCUMBRANCE_COL = "min_encumbrance";
 static const std::string DATATABLE_MAX_ENCUMBRANCE_COL = "max_encumbrance";
+
+namespace
+{
+	bool getNonnegativeEncumbranceObjVar(DynamicVariableList const & objVars, std::string const & name, int & value)
+	{
+		int integerValue = 0;
+		if (objVars.getItem(name, integerValue))
+		{
+			value = std::max(0, integerValue);
+			return true;
+		}
+
+		float realValue = 0.0f;
+		if (!objVars.getItem(name, realValue) || realValue != realValue)
+			return false;
+
+		if (realValue <= 0.0f)
+			value = 0;
+		else if (realValue >= static_cast<float>(std::numeric_limits<int>::max()))
+			value = std::numeric_limits<int>::max();
+		else
+			value = static_cast<int>(realValue);
+
+		return true;
+	}
+
+	int getNonnegativeEncumbrance(double value)
+	{
+		if (value != value || value <= 0.0)
+			return 0;
+		if (value >= static_cast<double>(std::numeric_limits<int>::max()))
+			return std::numeric_limits<int>::max();
+		return static_cast<int>(value);
+	}
+
+	bool isFiniteEncumbrance(float value)
+	{
+		return value == value &&
+			value <= std::numeric_limits<float>::max() &&
+			value >= -std::numeric_limits<float>::max();
+	}
+}
 
 // bio-link objvars
 static const std::string OBJVAR_BIO_LINK      = "biolink";
@@ -4101,7 +4146,9 @@ bool TangibleObject::isVisibleOnClient(Client const &client) const
  */
 bool TangibleObject::hasEncumbrances() const
 	{
-	return getObjVars().hasItem(OBJVAR_ARMOR_BASE + '.' + OBJVAR_ARMOR_ENCUMBRANCE);
+	std::vector<int> encumbrances;
+	return getEncumbrances(encumbrances) && encumbrances.size() == 3 &&
+		(encumbrances[0] > 0 || encumbrances[1] > 0 || encumbrances[2] > 0);
 }	// TangibleObject::hasEncumbrances
 
 // ----------------------------------------------------------------------
@@ -4116,67 +4163,103 @@ bool TangibleObject::hasEncumbrances() const
  * @return true if encumbrances has good data, false if not
  */
 bool TangibleObject::getEncumbrances(std::vector<int> & encumbrances) const
-		{
-static int datatable_type_col            = -1;
-static int datatable_min_encumbrance_col = -1;
-static int datatable_max_encumbrance_col = -1;
-
-	// NOTE: it might be better if we do all this via script, to reduce
-	// duplicate functionality
+	{
+	static int datatable_type_col            = -1;
+	static int datatable_min_encumbrance_col = -1;
+	static int datatable_max_encumbrance_col = -1;
 
 	encumbrances.clear();
 
-	DataTable * dt = DataTableManager::getTable(DATATABLE_ARMOR, true);
-	if (dt == nullptr)
-		return false;
-	else if (datatable_type_col == -1)
+	// Publish 14 crafted armor persists the final three costs directly. The
+	// triple is atomic so a partial or corrupt list cannot mix authorities.
+	int craftedHealth = 0;
+	int craftedAction = 0;
+	int craftedMind = 0;
+	if (getNonnegativeEncumbranceObjVar(getObjVars(), OBJVAR_PRECU_ARMOR_HEALTH_ENCUMBRANCE, craftedHealth) &&
+		getNonnegativeEncumbranceObjVar(getObjVars(), OBJVAR_PRECU_ARMOR_ACTION_ENCUMBRANCE, craftedAction) &&
+		getNonnegativeEncumbranceObjVar(getObjVars(), OBJVAR_PRECU_ARMOR_MIND_ENCUMBRANCE, craftedMind))
 	{
-		// cache the column indexes
-		datatable_type_col            = dt->findColumnNumber(DATATABLE_TYPE_COL);
-		datatable_min_encumbrance_col = dt->findColumnNumber(DATATABLE_MIN_ENCUMBRANCE_COL);
-		datatable_max_encumbrance_col = dt->findColumnNumber(DATATABLE_MAX_ENCUMBRANCE_COL);
-		if (datatable_type_col < 0 ||
-			datatable_min_encumbrance_col < 0 ||
-			datatable_max_encumbrance_col < 0)
+		encumbrances.push_back(craftedHealth);
+		encumbrances.push_back(craftedAction);
+		encumbrances.push_back(craftedMind);
+		return true;
+	}
+
+	// Static Publish 14 armor templates are the canonical compatibility
+	// source. Hold a valid zero triple long enough to let later-schema armor
+	// use its retained objvars, then fall back to the zero triple if needed.
+	bool haveStaticZeroEncumbrance = false;
+	ServerTangibleObjectTemplate const * const serverTemplate =
+		safe_cast<ServerTangibleObjectTemplate const *>(getObjectTemplate());
+	ServerArmorTemplate const * const armorTemplate = serverTemplate != nullptr ? serverTemplate->getArmor() : nullptr;
+	if (armorTemplate != nullptr)
+	{
+		encumbrances.push_back(std::max(0, armorTemplate->getEncumbrance(0)));
+		encumbrances.push_back(std::max(0, armorTemplate->getEncumbrance(1)));
+		encumbrances.push_back(std::max(0, armorTemplate->getEncumbrance(2)));
+		if (encumbrances[0] > 0 || encumbrances[1] > 0 || encumbrances[2] > 0)
+			return true;
+
+		haveStaticZeroEncumbrance = true;
+	}
+
+	// Preserve the complete later armor schema as the final compatibility
+	// source for retained expansion assets which have no authored P14 cost.
+	float baseEncumbrance = 0.0f;
+	std::vector<float> encumbranceSplit;
+	int armorLevel = 0;
+	bool const haveLaterObjVars =
+		getObjVars().getItem(OBJVAR_ARMOR_BASE + '.' + OBJVAR_ARMOR_ENCUMBRANCE, baseEncumbrance) &&
+		getObjVars().getItem(OBJVAR_ARMOR_BASE + '.' + OBJVAR_ENCUMBRANCE_SPLIT, encumbranceSplit) &&
+		encumbranceSplit.size() == 3 &&
+		getObjVars().getItem(OBJVAR_ARMOR_BASE + '.' + OBJVAR_ARMOR_LEVEL, armorLevel) &&
+		isFiniteEncumbrance(baseEncumbrance) &&
+		isFiniteEncumbrance(encumbranceSplit[0]) &&
+		isFiniteEncumbrance(encumbranceSplit[1]) &&
+		isFiniteEncumbrance(encumbranceSplit[2]);
+
+	DataTable * const dt = haveLaterObjVars ? DataTableManager::getTable(DATATABLE_ARMOR, true) : nullptr;
+	if (dt != nullptr)
+	{
+		if (datatable_type_col == -1)
 		{
-			WARNING_STRICT_FATAL(true, ("TangibleObject::getEncumbrances: armor datatable missing expected columns"));
-			return false;
+			datatable_type_col            = dt->findColumnNumber(DATATABLE_TYPE_COL);
+			datatable_min_encumbrance_col = dt->findColumnNumber(DATATABLE_MIN_ENCUMBRANCE_COL);
+			datatable_max_encumbrance_col = dt->findColumnNumber(DATATABLE_MAX_ENCUMBRANCE_COL);
+			if (datatable_type_col < 0 || datatable_min_encumbrance_col < 0 || datatable_max_encumbrance_col < 0)
+				WARNING_STRICT_FATAL(true, ("TangibleObject::getEncumbrances: armor datatable missing expected columns"));
+		}
+
+		if (datatable_type_col >= 0 && datatable_min_encumbrance_col >= 0 && datatable_max_encumbrance_col >= 0)
+		{
+			char armorLevelRowName[64];
+			snprintf(armorLevelRowName, sizeof(armorLevelRowName), "%s%d", DATATABLE_FINAL_ROW.c_str(), armorLevel);
+			int const armorLevelRow = dt->searchColumnInt(datatable_type_col, Crc::calculate(armorLevelRowName));
+			if (armorLevelRow >= 0)
+			{
+				int const minEncumbrance = dt->getIntValue(datatable_min_encumbrance_col, armorLevelRow);
+				int const maxEncumbrance = dt->getIntValue(datatable_max_encumbrance_col, armorLevelRow);
+				double const scaledEncumbrance = static_cast<double>(baseEncumbrance) *
+					(static_cast<double>(maxEncumbrance) - static_cast<double>(minEncumbrance)) +
+					static_cast<double>(minEncumbrance);
+
+				encumbrances.clear();
+				encumbrances.push_back(getNonnegativeEncumbrance(static_cast<double>(encumbranceSplit[0]) * scaledEncumbrance));
+				encumbrances.push_back(getNonnegativeEncumbrance(static_cast<double>(encumbranceSplit[1]) * scaledEncumbrance));
+				encumbrances.push_back(getNonnegativeEncumbrance(static_cast<double>(encumbranceSplit[2]) * scaledEncumbrance));
+				return true;
+			}
 		}
 	}
 
-	// get the encumbrance values from the objvars
-	float baseEncumbrance = 0;
-	if (!getObjVars().getItem(OBJVAR_ARMOR_BASE + '.' + OBJVAR_ARMOR_ENCUMBRANCE, baseEncumbrance))
-			return false;
-	std::vector<float> encumbranceSplit;
-	if (!getObjVars().getItem(OBJVAR_ARMOR_BASE + '.' + OBJVAR_ENCUMBRANCE_SPLIT, encumbranceSplit))
-			return false;
-	if (encumbranceSplit.size() != 3)
-		return false;
-
-	// get the actual encumbrance range from the armor datatable
-	int armorLevel;
-	if (!getObjVars().getItem(OBJVAR_ARMOR_BASE + "." + OBJVAR_ARMOR_LEVEL, armorLevel))
-			return false;
-	char armorLevelRowName[64];
-	snprintf(armorLevelRowName, sizeof(armorLevelRowName), "%s%d", DATATABLE_FINAL_ROW.c_str(), armorLevel);
-	int armorLevelRow = dt->searchColumnInt(datatable_type_col, Crc::calculate(armorLevelRowName));
-	if (armorLevelRow < 0)
-		return false;
-	int minEncumbrance = dt->getIntValue(datatable_min_encumbrance_col, armorLevelRow);
-	int maxEncumbrance = dt->getIntValue(datatable_max_encumbrance_col, armorLevelRow);
-
-	// scale the base encumbrance by the actual encumbrance range
-	baseEncumbrance = baseEncumbrance * (maxEncumbrance - minEncumbrance) + minEncumbrance;
-
-	// split the base encumbrace into the three attrib groups
-	encumbrances.resize(encumbranceSplit.size());
-	std::vector<int>::iterator j = encumbrances.begin();
-	for (std::vector<float>::const_iterator i = encumbranceSplit.begin(); i != encumbranceSplit.end(); ++i, ++j)
+	if (haveStaticZeroEncumbrance)
 	{
-		*j = static_cast<int>((*i) * baseEncumbrance);
-		}
+		encumbrances.assign(3, 0);
 		return true;
+	}
+
+	encumbrances.clear();
+	return false;
 	}
 
 // ----------------------------------------------------------------------
