@@ -249,6 +249,7 @@ namespace CreatureObjectNamespace
 	bool isRetiredNgeProgressionSkillName(std::string const & skillName)
 	{
 		return skillName.find("class_") == 0 ||
+			skillName.find("bh_title") == 0 ||
 			skillName == "expertise" ||
 			skillName.find("expertise_") == 0 ||
 			skillName.find("internal_expertise_") == 0;
@@ -7733,6 +7734,13 @@ void CreatureObject::clearRetiredNgeProgressionSkills()
 
 	for (std::vector<SkillObject const *>::const_iterator iter = skillsToRetire.begin(); iter != skillsToRetire.end(); ++iter)
 		m_skills.erase(*iter);
+
+	PlayerObject * const playerObject = PlayerCreatureController::getPlayerObject(this);
+	if ((playerObject != nullptr) &&
+		CreatureObjectNamespace::isRetiredNgeProgressionSkillName(playerObject->getTitle()))
+	{
+		playerObject->setTitle(std::string());
+	}
 
 	if (!skillsToRetire.empty())
 	{
