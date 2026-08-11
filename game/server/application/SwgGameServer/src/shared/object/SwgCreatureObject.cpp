@@ -27,6 +27,7 @@ namespace SwgCreatureObjectNamespace
 	char const * const cms_jediTitleSkill = "force_title_jedi_rank_02";
 	char const * const cms_jediDisciplinePrefix = "force_discipline";
 	char const * const cms_forceRankObjvar = "force_rank.rank";
+	char const * const cms_forceRankCouncilObjvar = "force_rank.council";
 	char const * const cms_smugglerBountyObjvar = "smuggler.bounty";
 	char const * const cms_smugglerScriptData = "smuggler";
 	char const * const cms_smugglerBountyScriptData = "smugglerBountyValue";
@@ -48,9 +49,18 @@ namespace SwgCreatureObjectNamespace
 		if (player != nullptr)
 		{
 			SwgPlayerObject const * const swgPlayer = safe_cast<SwgPlayerObject const *>(player);
-			if (swgPlayer->getJediState() == JS_forceRankedLight)
+			int forceRank = -1;
+			int forceRankCouncil = -1;
+			bool const validForceRank = creature.getObjVars().getItem(cms_forceRankObjvar, forceRank) &&
+				forceRank >= 0 && forceRank <= 11;
+			bool const validForceRankCouncil =
+				creature.getObjVars().getItem(cms_forceRankCouncilObjvar, forceRankCouncil) &&
+				(forceRankCouncil == 1 || forceRankCouncil == 2);
+			if (validForceRank && validForceRankCouncil && forceRankCouncil == 2 &&
+				swgPlayer->getJediState() == JS_forceRankedLight)
 				return JS_forceRankedLight;
-			if (swgPlayer->getJediState() == JS_forceRankedDark)
+			if (validForceRank && validForceRankCouncil && forceRankCouncil == 1 &&
+				swgPlayer->getJediState() == JS_forceRankedDark)
 				return JS_forceRankedDark;
 		}
 		return JS_jedi;
