@@ -4033,6 +4033,24 @@ void CreatureObject::clearAims ()
 //-----------------------------------------------------------------------
 
 /**
+ * Applies an explicit positive pool heal through the authoritative attribute
+ * mutation path. Unlike generic attribute changes, the caller may opt into
+ * the PRE-CU healing-received observer.
+ */
+int CreatureObject::healDamage(Attributes::Enumerator attribute, int amount,
+	NetworkId const & healer, bool notifyHealingReceived)
+{
+	if (attribute < 0 || attribute >= Attributes::NumberOfAttributes ||
+		!Attributes::isAttribPool(attribute) || amount <= 0 || !healer.isValid())
+		return 0;
+
+	return alterAttribute(attribute, amount, true, healer, false,
+		notifyHealingReceived);
+}
+
+//-----------------------------------------------------------------------
+
+/**
  * Modifies a creature's attribute. No other function should modify the pool indexes
  * of m_attributes. Will incapacitate the creature if an attribute drops to 0.
  *
@@ -4043,12 +4061,18 @@ void CreatureObject::clearAims ()
  *								for no one)
  * @param force                 force the change, even if we would normally not
  *                              make it
+ * @param notifyHealingReceived notify the PRE-CU healing observer after a
+ *                              positive authoritative healing request
  *
  * @return the amount of damage actually applied
  */
 int CreatureObject::alterAttribute(Attributes::Enumerator attrib, int delta,
-	bool checkIncapacitation, const NetworkId & source, bool force)
+	bool checkIncapacitation, const NetworkId & source, bool force,
+	bool notifyHealingReceived)
 {
+	bool const healingReceivedRequested =
+		notifyHealingReceived && delta > 0 && source.isValid();
+
 	if (isAuthoritative())
 	{
 		if (attrib < 0 || attrib >= Attributes::NumberOfAttributes)
@@ -4165,13 +4189,27 @@ int CreatureObject::alterAttribute(Attributes::Enumerator attrib, int delta,
 		else
 			delta = 0;
 
-		return delta + attribModChange + regenChange;
+		int const appliedDelta = delta + attribModChange + regenChange;
+		if (healingReceivedRequested)
+		{
+			ServerObject const * const healer = ServerWorld::findObjectByNetworkId(source);
+			GameScriptObject * const scriptObject = getScriptObject();
+			if (healer != nullptr && scriptObject != nullptr)
+			{
+				ScriptParams params;
+				params.addParam(healer->getNetworkId());
+				params.addParam(appliedDelta);
+				IGNORE_RETURN(scriptObject->trigAllScripts(Scripting::TRIG_HEALING_RECEIVED, params));
+			}
+		}
+
+		return appliedDelta;
 	}
 	else
 	{
 		sendControllerMessageToAuthServer(CM_alterAttribute,
 			new MessageQueueAlterAttribute(attrib, delta, checkIncapacitation,
-			source));
+			source, notifyHealingReceived));
 		return 0;
 	}
 }	// CreatureObject::alterAttribute

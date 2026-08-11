@@ -22,13 +22,14 @@ class MessageQueueAlterAttribute : public MessageQueue::Data
 
 public:
 
-	         MessageQueueAlterAttribute(int attrib, int delta, bool checkIncapacitation, const NetworkId & source);
+	         MessageQueueAlterAttribute(int attrib, int delta, bool checkIncapacitation, const NetworkId & source, bool notifyHealingReceived = false);
 	virtual ~MessageQueueAlterAttribute();
 
 	int               getAttrib() const;
 	int               getDelta() const;
 	bool              getCheckIncapacitation() const;
 	const NetworkId & getSource() const;
+	bool              getNotifyHealingReceived() const;
 	
 
 private:
@@ -40,7 +41,8 @@ private:
 	int               m_attrib;
 	int               m_delta;
 	bool              m_checkIncapacitation;
-	const NetworkId & m_source;
+	NetworkId         m_source;
+	bool              m_notifyHealingReceived;
 };
 
 
@@ -66,9 +68,13 @@ inline const NetworkId & MessageQueueAlterAttribute::getSource() const
 	return m_source;
 }
 
+inline bool MessageQueueAlterAttribute::getNotifyHealingReceived() const
+{
+	return m_notifyHealingReceived;
+}
+
 
 //-----------------------------------------------------------------------
 
 
 #endif	// INCLUDED_MessageQueueAlterAttribute_H
-

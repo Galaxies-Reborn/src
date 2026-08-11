@@ -25,11 +25,12 @@ CONTROLLER_MESSAGE_IMPLEMENTATION(MessageQueueAlterAttribute, CM_alterAttribute)
 // ----------------------------------------------------------------------
 
 MessageQueueAlterAttribute::MessageQueueAlterAttribute(int attrib, int delta, 
-	bool checkIncapacitation, const NetworkId & source) :
+	bool checkIncapacitation, const NetworkId & source, bool notifyHealingReceived) :
 	m_attrib(attrib),
 	m_delta(delta),
 	m_checkIncapacitation(checkIncapacitation),
-	m_source(source)
+	m_source(source),
+	m_notifyHealingReceived(notifyHealingReceived)
 {
 }	
 
@@ -48,6 +49,7 @@ void MessageQueueAlterAttribute::pack(const MessageQueue::Data* const data, Arch
 		Archive::put(target, msg->m_delta);
 		Archive::put(target, msg->m_checkIncapacitation);
 		Archive::put(target, msg->m_source);
+		Archive::put(target, msg->m_notifyHealingReceived);
 	}
 }
 
@@ -59,13 +61,15 @@ MessageQueue::Data* MessageQueueAlterAttribute::unpack(Archive::ReadIterator & s
 	int delta;
 	bool checkIncapacitation;
 	NetworkId attacker;
+	bool notifyHealingReceived;
 
 	Archive::get(source, attrib);
 	Archive::get(source, delta);
 	Archive::get(source, checkIncapacitation);
 	Archive::get(source, attacker);
+	Archive::get(source, notifyHealingReceived);
 	
-	return new MessageQueueAlterAttribute(attrib, delta, checkIncapacitation, attacker);
+	return new MessageQueueAlterAttribute(attrib, delta, checkIncapacitation, attacker, notifyHealingReceived);
 }
 
 

@@ -232,6 +232,7 @@ public:
 	int                 getWoundAmount           (Attributes::Enumerator attribute) const;
 	int                 addWound                 (Attributes::Enumerator attribute, int value);
 	int                 healWound                (Attributes::Enumerator attribute, int value);
+	int                 healDamage               (Attributes::Enumerator attribute, int amount, NetworkId const & healer, bool notifyHealingReceived);
 	void                setAttribute             (Attributes::Enumerator attribute, Attributes::Value value);
 	virtual void        getAttributes            (std::vector<std::pair<std::string, Unicode::String> > &data) const;
 	void                sendTimedModData         (uint32 id, float time, bool updateCache = true);
@@ -749,7 +750,7 @@ private:
 
 	void     setupInventory();
 	void     setupSkillData();
-	int      alterAttribute(Attributes::Enumerator attrib, int delta, bool checkIncapacitation, const NetworkId & source = NetworkId::cms_invalid, bool force = false);
+	int      alterAttribute(Attributes::Enumerator attrib, int delta, bool checkIncapacitation, const NetworkId & source = NetworkId::cms_invalid, bool force = false, bool notifyHealingReceived = false);
 	void     testIncapacitation(const NetworkId & attackerId);
 	void     initializeNewPlayer  ();
 	

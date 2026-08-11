@@ -438,6 +438,9 @@ static const Scripting::ScriptFuncTable ScriptFuncList[] =
 	
 	{Scripting::TRIG_WAYPOINT_WARP, "OnWaypointWarpRequested", "O"},
 
+	// PRE-CU camp healing observer: healer, authoritative amount applied.
+	{Scripting::TRIG_HEALING_RECEIVED, "OnHealingReceived", "Oi"},
+
 //-- finish it up
 
 	{Scripting::TRIG_LAST_TRIGGER,			nullptr,					nullptr}
@@ -476,4 +479,3 @@ void Scripting::RemoveScriptFuncHashMap(void)
     delete Scripting::ScriptFuncHashMap;
     Scripting::ScriptFuncHashMap = nullptr;
 }
-

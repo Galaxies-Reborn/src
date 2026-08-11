@@ -49,6 +49,7 @@ namespace ScriptMethodsAttributesNamespace
 	jint         JNICALL getUnmodifiedMaxAttrib(JNIEnv *env, jobject self, jlong target, jint attrib);
 	jint         JNICALL addWound(JNIEnv *env, jobject self, jlong target, jint attrib, jint value);
 	jint         JNICALL healWound(JNIEnv *env, jobject self, jlong target, jint attrib, jint value);
+	jint         JNICALL healDamage(JNIEnv *env, jobject self, jlong target, jlong healer, jint attrib, jint amount, jboolean notifyHealingReceived);
 	jboolean     JNICALL setAttrib(JNIEnv *env, jobject self, jlong target, jint attrib, jint value);
 	jboolean     JNICALL setMaxAttrib(JNIEnv *env, jobject self, jlong target, jint attrib, jint value);
 	jboolean     JNICALL addToAttrib(JNIEnv *env, jobject self, jlong target, jint attrib, jint value);
@@ -107,6 +108,7 @@ const JNINativeMethod NATIVES[] = {
 	JF("_getUnmodifiedMaxAttrib", "(JI)I", getUnmodifiedMaxAttrib),
 	JF("_addWound", "(JII)I", addWound),
 	JF("_healWound", "(JII)I", healWound),
+	JF("_healDamage", "(JJIIZ)I", healDamage),
 	JF("_setAttrib", "(JII)Z", setAttrib),
 	JF("_setMaxAttrib", "(JII)Z", setMaxAttrib),
 	JF("_addToAttrib", "(JII)Z", addToAttrib),
@@ -397,6 +399,31 @@ jint JNICALL ScriptMethodsAttributesNamespace::healWound(JNIEnv *env, jobject se
 
 	return creature->healWound(static_cast<Attributes::Enumerator>(attrib), value);
 }	// JavaLibrary::healWound
+
+/**
+ * Applies one authoritative PRE-CU pool heal and optionally notifies the
+ * target's healing-received observer. The explicit notification flag keeps
+ * regeneration, fixture restoration, and generic attribute setters silent.
+ */
+jint JNICALL ScriptMethodsAttributesNamespace::healDamage(JNIEnv *env, jobject self, jlong target, jlong healer, jint attrib, jint amount, jboolean notifyHealingReceived)
+{
+	UNREF(env);
+	UNREF(self);
+
+	if (attrib < 0 || attrib >= Attributes::NumberOfAttributes ||
+		!Attributes::isAttribPool(attrib) || amount <= 0)
+		return 0;
+
+	CreatureObject * creature = nullptr;
+	ServerObject * healerObject = nullptr;
+	if (!JavaLibrary::getObject(target, creature) ||
+		!JavaLibrary::getObject(healer, healerObject))
+		return 0;
+
+	return creature->healDamage(static_cast<Attributes::Enumerator>(attrib),
+		static_cast<int>(amount), healerObject->getNetworkId(),
+		notifyHealingReceived != JNI_FALSE);
+}
 
 /**
  * Sets a creatue's attribute.
@@ -1632,5 +1659,3 @@ void JNICALL ScriptMethodsAttributesNamespace::setRegenRate(JNIEnv *env, jobject
 
 	creature->setRegenRate(attrib, value);
 }	// ScriptMethodsAttributesNamespace::setRegenRate
-
-

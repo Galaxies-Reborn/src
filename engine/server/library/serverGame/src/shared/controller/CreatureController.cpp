@@ -561,7 +561,9 @@ void CreatureController::handleMessage(const int message, const float value, con
 			owner->alterAttribute(msg->getAttrib(),
 				msg->getDelta(),
 				msg->getCheckIncapacitation(),
-				msg->getSource()
+				msg->getSource(),
+				false,
+				msg->getNotifyHealingReceived()
 			);
 		}
 	}
