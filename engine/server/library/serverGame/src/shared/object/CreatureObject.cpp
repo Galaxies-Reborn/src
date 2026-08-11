@@ -5431,15 +5431,29 @@ void CreatureObject::decayAttributes(float time)
 	int i;
 	float regenerationRate[3] = {0,0,0};
 	m_regenerationTime += time;
-	for (i = 0; i < 3; ++i)
+	Postures::Enumerator const posture = getPosture();
+	bool const canRegenerate =
+		posture != Postures::Incapacitated &&
+		posture != Postures::Dead &&
+		(isPlayerControlled() || !isInCombat());
+	if (canRegenerate)
 	{
-		int poolAttrib = Attributes::POOLS[i];
-		int maxAttrib = getMaxAttribute(poolAttrib);
- 		int currentAttrib = getAttribute(poolAttrib);
- 		if (currentAttrib < maxAttrib)
+		float regenerationModifier = 1.0f;
+		if (posture == Postures::Crouched)
+			regenerationModifier = 1.25f;
+		else if (posture == Postures::Sitting)
+			regenerationModifier = 1.75f;
+
+		for (i = 0; i < 3; ++i)
 		{
-			regenerationRate[i] = getRegenRate(poolAttrib);
-			m_regeneration[poolAttrib] += regenerationRate[i] * time;
+			int poolAttrib = Attributes::POOLS[i];
+			int maxAttrib = getMaxAttribute(poolAttrib);
+			int currentAttrib = getAttribute(poolAttrib);
+			if (currentAttrib < maxAttrib)
+			{
+				regenerationRate[i] = getRegenRate(poolAttrib);
+				m_regeneration[poolAttrib] += regenerationRate[i] * time * regenerationModifier;
+			}
 		}
 	}
 
