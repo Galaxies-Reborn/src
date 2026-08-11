@@ -26,7 +26,6 @@
 #include "serverUtility/FreeCtsDataTable.h"
 #include "sharedFoundation/CalendarTime.h"
 #include "sharedFoundation/ConstCharCrcString.h"
-#include "sharedGame/PlayerCreationManager.h"
 #include "sharedLog/Log.h"
 #include "sharedNetworkMessages/ChatEnum.h"
 #include "sharedNetworkMessages/ChatOnChangeFriendStatus.h"
@@ -300,29 +299,42 @@ void ConnectionServerConnection::onReceive (const Archive::ByteStream & message)
 							}
 						}
 					}
+					struct PrecuStartingProfession
+					{
+						char const * noviceSkill;
+						char const * profession;
+					};
+					static PrecuStartingProfession const s_precuStartingProfessions[] =
+					{
+						{ "crafting_artisan_novice", "crafting_artisan" },
+						{ "combat_brawler_novice", "combat_brawler" },
+						{ "social_entertainer_novice", "social_entertainer" },
+						{ "combat_marksman_novice", "combat_marksman" },
+						{ "science_medic_novice", "science_medic" },
+						{ "outdoors_scout_novice", "outdoors_scout" }
+					};
+
 					std::string professionName;
-					const CreatureObject::SkillList & skills = character->getSkillList();
-					if (!skills.empty())
+					CreatureObject::SkillList const & skills = character->getSkillList();
+					for (size_t professionIndex = 0;
+						professionIndex < sizeof(s_precuStartingProfessions) / sizeof(s_precuStartingProfessions[0]) && professionName.empty();
+						++professionIndex)
 					{
-						for (CreatureObject::SkillList::const_iterator i = skills.begin(); i != skills.end(); ++i)
+						for (CreatureObject::SkillList::const_iterator skill = skills.begin(); skill != skills.end(); ++skill)
 						{
-							const SkillObject * profession = (*i)->findProfessionForSkill();
-							if (profession != nullptr)
-								professionName = profession->getSkillName();
-						}
-					}
-					if (professionName.empty())
-					{
-						// just get the 1st profession available
-						PlayerCreationManager::StringVector professions;
-						PlayerCreationManager::getProfessionVector (professions, "");
-						if (! professions.empty())
-						{
-							professionName = professions[0];
+							if (*skill && (*skill)->getSkillName() == s_precuStartingProfessions[professionIndex].noviceSkill)
+							{
+								professionName = s_precuStartingProfessions[professionIndex].profession;
+								break;
+							}
 						}
 					}
 
-					if (playerObject)
+					if (professionName.empty())
+					{
+						LOG("CustomerService", ("CharacterTransfer: Transfer failed: character %s owns none of the six direct PRE-CU novice profession skills. %s", character->getNetworkId().getValueString().c_str(), transferCharacterData.toString().c_str()));
+					}
+					else if (playerObject)
 					{
 						// set objvar on the creature indicating that transfer will be free,
 						// so that script can include the information in the packed dictionary

@@ -9696,6 +9696,42 @@ static void commandFuncRoomPickRandomPlayer(Command const &, NetworkId const &ac
 
 // ======================================================================
 
+bool CommandCppFuncs::getPrecuCtsStatAllocation(NetworkId const & actor, std::vector<int> & allocation)
+{
+	allocation.clear();
+	CreatureObject const * const creature = CreatureObject::getCreatureObject(actor);
+	if (!creature || !creature->isAuthoritative() || !creature->isPlayerControlled() ||
+		creature->getObjVars().hasItem(CommandCppFuncsNamespace::cms_statMigrationObjVarRoot))
+		return false;
+
+	std::vector<int> currentAllocation;
+	currentAllocation.reserve(Attributes::NumberOfAttributes);
+	for (int attribute = 0; attribute < Attributes::NumberOfAttributes; ++attribute)
+		currentAllocation.push_back(creature->getUnmodifiedMaxAttribute(attribute));
+
+	if (!CommandCppFuncsNamespace::validateStatMigrationTargets(*creature, currentAllocation))
+		return false;
+
+	allocation.swap(currentAllocation);
+	return true;
+}
+
+// ----------------------------------------------------------------------
+
+bool CommandCppFuncs::applyPrecuCtsStatAllocation(NetworkId const & actor, std::vector<int> const & allocation)
+{
+	CreatureObject * const creature = CreatureObject::getCreatureObject(actor);
+	if (!creature || !creature->isAuthoritative() || !creature->isPlayerControlled() ||
+		creature->getObjVars().hasItem(CommandCppFuncsNamespace::cms_statMigrationObjVarRoot) ||
+		!CommandCppFuncsNamespace::validateStatMigrationTargets(*creature, allocation))
+		return false;
+
+	CommandCppFuncsNamespace::applyStatMigration(*creature, allocation);
+	return true;
+}
+
+// ----------------------------------------------------------------------
+
 bool CommandCppFuncs::canCommitStatMigration(NetworkId const & actor)
 {
 	CreatureObject * const creature = CreatureObject::getCreatureObject(actor);

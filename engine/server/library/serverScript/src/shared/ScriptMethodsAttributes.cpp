@@ -10,16 +10,19 @@
 #include "serverScript/JavaLibrary.h"
 
 #include "serverGame/AttribModNameManager.h"
+#include "serverGame/CommandCppFuncs.h"
 #include "serverGame/ConfigServerGame.h"
 #include "serverGame/CreatureController.h"
 #include "serverGame/CreatureObject.h"
 #include "serverGame/ServerWeaponObjectTemplate.h"
 #include "serverGame/ServerWorld.h"
 #include "sharedFoundation/Crc.h"
+#include "sharedFoundation/NetworkId.h"
 #include "sharedGame/GameObjectTypes.h"
 #include "swgSharedUtility/CombatEngineData.h"
 
 #include <climits>
+#include <vector>
 
 using namespace JNIWrappersNamespace;
 
@@ -67,6 +70,8 @@ namespace ScriptMethodsAttributesNamespace
 	jboolean     JNICALL setMaxAttribs(JNIEnv *env, jobject self, jlong target, jobjectArray values);
 	jboolean     JNICALL addToAttribs(JNIEnv *env, jobject self, jlong target, jobjectArray values);
 	jboolean     JNICALL addToMaxAttribs(JNIEnv *env, jobject self, jlong target, jobjectArray values);
+	jintArray    JNICALL getPrecuCtsStatAllocation(JNIEnv *env, jobject self, jlong target);
+	jboolean     JNICALL applyPrecuCtsStatAllocation(JNIEnv *env, jobject self, jlong target, jintArray allocation);
 	jint         JNICALL getHitpoints(JNIEnv *env, jobject self, jlong target);
 	jint         JNICALL getMaxHitpoints(JNIEnv *env, jobject self, jlong target);
 	jint         JNICALL getTotalHitpoints(JNIEnv *env, jobject self, jlong target);
@@ -123,6 +128,8 @@ const JNINativeMethod NATIVES[] = {
 	JF("_setMaxAttribs", "(J[Lscript/attribute;)Z", setMaxAttribs),
 	JF("_addToAttribs", "(J[Lscript/attribute;)Z", addToAttribs),
 	JF("_addToMaxAttribs", "(J[Lscript/attribute;)Z", addToMaxAttribs),
+	JF("_getPrecuCtsStatAllocation", "(J)[I", getPrecuCtsStatAllocation),
+	JF("_applyPrecuCtsStatAllocation", "(J[I)Z", applyPrecuCtsStatAllocation),
 	JF("_getHitpoints", "(J)I", getHitpoints),
 	JF("_getMaxHitpoints", "(J)I", getMaxHitpoints),
 	JF("_getTotalHitpoints", "(J)I", getTotalHitpoints),
@@ -1111,6 +1118,71 @@ jboolean JNICALL ScriptMethodsAttributesNamespace::addToMaxAttribs(JNIEnv *env, 
 	}
 	return JNI_TRUE;
 }	// JavaLibrary::addToMaxAttribs
+
+//========================================================================
+// class JavaLibrary JNI CTS stat-allocation callback methods
+//========================================================================
+
+/**
+ * Returns the authoritative PRE-CU nine-stat allocation for CTS.
+ */
+jintArray JNICALL ScriptMethodsAttributesNamespace::getPrecuCtsStatAllocation(JNIEnv *env, jobject self, jlong target)
+{
+	UNREF(self);
+
+	if (target == 0)
+		return 0;
+
+	std::vector<int> allocation;
+	if (!CommandCppFuncs::getPrecuCtsStatAllocation(
+		NetworkId(static_cast<NetworkId::NetworkIdType>(target)), allocation))
+		return 0;
+
+	if (static_cast<int>(allocation.size()) != Attributes::NumberOfAttributes)
+		return 0;
+
+	jint values[Attributes::NumberOfAttributes];
+	for (int attribute = 0; attribute < Attributes::NumberOfAttributes; ++attribute)
+		values[attribute] = static_cast<jint>(allocation[attribute]);
+
+	LocalIntArrayRefPtr result = createNewIntArray(Attributes::NumberOfAttributes);
+	if (result == LocalIntArrayRef::cms_nullPtr || env->ExceptionCheck())
+		return 0;
+
+	setIntArrayRegion(*result, 0, Attributes::NumberOfAttributes, values);
+	if (env->ExceptionCheck())
+		return 0;
+
+	return result->getReturnValue();
+}
+
+//----------------------------------------------------------------------
+
+/**
+ * Applies one fully validated authoritative PRE-CU nine-stat allocation for CTS.
+ */
+jboolean JNICALL ScriptMethodsAttributesNamespace::applyPrecuCtsStatAllocation(JNIEnv *env, jobject self, jlong target, jintArray allocation)
+{
+	UNREF(self);
+
+	if (target == 0 || allocation == 0 || env->GetArrayLength(allocation) != Attributes::NumberOfAttributes)
+		return JNI_FALSE;
+
+	jint values[Attributes::NumberOfAttributes];
+	env->GetIntArrayRegion(allocation, 0, Attributes::NumberOfAttributes, values);
+	if (env->ExceptionCheck())
+		return JNI_FALSE;
+
+	std::vector<int> nativeAllocation;
+	nativeAllocation.reserve(Attributes::NumberOfAttributes);
+	for (int attribute = 0; attribute < Attributes::NumberOfAttributes; ++attribute)
+		nativeAllocation.push_back(static_cast<int>(values[attribute]));
+
+	return CommandCppFuncs::applyPrecuCtsStatAllocation(
+		NetworkId(static_cast<NetworkId::NetworkIdType>(target)), nativeAllocation)
+		? JNI_TRUE
+		: JNI_FALSE;
+}
 
 //========================================================================
 // class JavaLibrary JNI hitpoint callback methods
