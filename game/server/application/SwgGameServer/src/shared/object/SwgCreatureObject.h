@@ -26,7 +26,10 @@ public:
 	virtual void handleCMessageTo (const MessageToPayload &message);
 
 	bool         isJedi(void) const;
+	bool         hasPreCuJediTitle(void) const;
 	const int    getSpentJediSkillPoints() const;
+	int          getPreCuForceRank() const;
+	void         synchronizeJediBountyRegistry();
 
 	virtual Controller* createDefaultController();
 	virtual float       alter(float time);
@@ -39,7 +42,7 @@ public:
 	int           getBountyValue() const;
 
 	virtual const bool  grantSkill(const SkillObject & newSkill);
-	virtual void        revokeSkill(const SkillObject & oldSkill);
+	virtual void        revokeSkill(const SkillObject & oldSkill, bool silent = false);
 
 	virtual void        setPvpFaction(Pvp::FactionId factionId);
 

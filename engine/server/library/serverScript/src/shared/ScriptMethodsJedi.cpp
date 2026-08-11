@@ -12,8 +12,13 @@
 #include "serverScript/ScriptParameters.h"
 #include "serverGame/CreatureObject.h"
 #include "serverGame/MessageToQueue.h"
+#include "serverGame/NameManager.h"
 #include "serverGame/PlayerCreatureController.h"
 #include "serverGame/PlayerObject.h"
+#include "sharedObject/NetworkIdManager.h"
+#include "sharedFoundation/Os.h"
+#include "sharedSkillSystem/SkillManager.h"
+#include "sharedSkillSystem/SkillObject.h"
 #include "SwgGameServer/JediManagerObject.h"
 #include "SwgGameServer/SwgCreatureObject.h"
 #include "SwgGameServer/SwgPlayerObject.h"
@@ -30,6 +35,16 @@ using namespace JNIWrappersNamespace;
 
 namespace ScriptMethodsJediNamespace
 {
+	char const * const cms_smugglerBountyObjvar = "smuggler.bounty";
+	char const * const cms_smugglerScriptData = "smuggler";
+	char const * const cms_smugglerBountyValueScriptData = "smugglerBountyValue";
+	char const * const cms_bountyKillBufferScriptData = "precuBountyKillBufferUntil";
+	char const * const cms_lastBountyKillObjvar = "bounty.precuLastKillTime";
+	char const * const cms_bountyMissionCooldownPrefix = "bounty.precuMissionCooldown.";
+	char const * const cms_investigationThreeSkill = "combat_bountyhunter_investigation_03";
+	int const cms_minimumJediBountyVisibility = 1500;
+	int const cms_bountyKillBufferSeconds = 30 * 60;
+
 	bool install();
 
 	jint         JNICALL getMaxForcePower(JNIEnv *env, jobject self, jlong target);
@@ -479,14 +494,8 @@ jboolean JNICALL ScriptMethodsJediNamespace::isJedi(JNIEnv * env, jobject self, 
 	if (!JavaLibrary::getObject(target, creature))
 		return JNI_FALSE;
 
-	const PlayerObject * player = PlayerCreatureController::getPlayerObject(creature);
-	if (player == nullptr)
-		return JNI_FALSE;
-	const SwgPlayerObject * jedi = safe_cast<const SwgPlayerObject *>(player);
-
-	if (jedi->isJedi())
-		return JNI_TRUE;
-	return JNI_FALSE;
+	SwgCreatureObject const * const swgCreature = safe_cast<SwgCreatureObject const *>(creature);
+	return swgCreature->hasPreCuJediTitle() ? JNI_TRUE : JNI_FALSE;
 }	// JavaLibrary::isJedi
 
 /**
@@ -511,7 +520,8 @@ jint JNICALL ScriptMethodsJediNamespace::getJediVisibility(JNIEnv * env, jobject
 		return JNI_FALSE;
 	const SwgPlayerObject * jedi = safe_cast<const SwgPlayerObject *>(player);
 
-	if (!jedi->isJedi())
+	SwgCreatureObject const * const swgCreature = safe_cast<SwgCreatureObject const *>(creature);
+	if (!swgCreature->hasPreCuJediTitle())
 		return -1;
 
 	return jedi->getJediVisibility();
@@ -540,7 +550,8 @@ jboolean JNICALL ScriptMethodsJediNamespace::setJediVisibility(JNIEnv * env, job
 		return JNI_FALSE;
 	SwgPlayerObject * jedi = safe_cast<SwgPlayerObject *>(player);
 
-	if (!jedi->isJedi())
+	SwgCreatureObject const * const swgCreature = safe_cast<SwgCreatureObject const *>(creature);
+	if (!swgCreature->hasPreCuJediTitle())
 		return JNI_FALSE;
 
 	jedi->setJediVisibility(visibility);
@@ -570,10 +581,13 @@ jboolean JNICALL ScriptMethodsJediNamespace::changeJediVisibility(JNIEnv * env, 
 		return JNI_FALSE;
 	SwgPlayerObject * jedi = safe_cast<SwgPlayerObject *>(player);
 
-	if (!jedi->isJedi())
+	SwgCreatureObject const * const swgCreature = safe_cast<SwgCreatureObject const *>(creature);
+	if (!swgCreature->hasPreCuJediTitle())
 		return JNI_FALSE;
 
-	jedi->setJediVisibility(jedi->getJediVisibility() + delta);
+	long long const changedVisibility = static_cast<long long>(jedi->getJediVisibility()) + delta;
+	jedi->setJediVisibility(changedVisibility < 0 ? 0 :
+		(changedVisibility > 8000 ? 8000 : static_cast<int>(changedVisibility)));
 	return JNI_TRUE;
 }	// JavaLibrary::changeJediVisibility
 
@@ -594,25 +608,30 @@ jboolean JNICALL ScriptMethodsJediNamespace::setJediBountyValue(JNIEnv * env, jo
 	CreatureObject * creature = nullptr;
 	if (!JavaLibrary::getObject(target, creature))
 		return JNI_FALSE;
-	SwgCreatureObject const * jediCreature = safe_cast<SwgCreatureObject const *>(creature);
+	SwgCreatureObject * const jediCreature = safe_cast<SwgCreatureObject *>(creature);
 
 	PlayerObject const * player = PlayerCreatureController::getPlayerObject(creature);
 	if (player == nullptr)
 		return JNI_FALSE;
-	SwgPlayerObject const * jediPlayer = safe_cast<SwgPlayerObject const *>(player);
-
-	JediManagerObject * jediManager = static_cast<SwgServerUniverse &>(
-			ServerUniverse::getInstance()).getJediManager();
-	if (jediManager == nullptr)
+	if (bountyValue < 0)
 		return JNI_FALSE;
+	if (jediCreature->hasPreCuJediTitle())
+	{
+		// The Java value is only a synchronization signal for title-derived
+		// Jedi.  Native code owns the canonical Publish 14 reward calculation.
+		jediCreature->synchronizeJediBountyRegistry();
+		return JNI_TRUE;
+	}
 
-	jediManager->addJedi(creature->getNetworkId(), creature->getObjectName(),
-		creature->getPosition_w(), creature->getSceneId(), jediPlayer->getJediVisibility(),
-		bountyValue, 0,
-		0, jediPlayer->getJediState(), jediCreature->getSpentJediSkillPoints(), creature->getPvpFaction());
+	int smugglerBounty = 0;
+	bool const taggedSmuggler = jediCreature->getObjVars().getItem(cms_smugglerBountyObjvar, smugglerBounty) &&
+		smugglerBounty > 0;
+	bool const validCompatibilityCall = taggedSmuggler ? bountyValue == smugglerBounty : bountyValue == 0;
 
-	return JNI_TRUE;
-}	// JavaLibrary::setJediVisibility
+	// Synchronization also purges stale registry entries for arbitrary callers.
+	jediCreature->synchronizeJediBountyRegistry();
+	return validCompatibilityCall ? JNI_TRUE : JNI_FALSE;
+}	// JavaLibrary::setJediBountyValue
 
 /**
  * Sends a request to find Jedi characters. Limits are passed in for statistics
@@ -712,8 +731,47 @@ jboolean JNICALL ScriptMethodsJediNamespace::requestJediBounty(JNIEnv * env, job
 		return JNI_FALSE;
 
 	const NetworkId hunterId(hunter);
-	if (hunterId == NetworkId::cms_invalid)
+	if (hunterId == NetworkId::cms_invalid || hunterId == targetId)
 		return JNI_FALSE;
+
+	CreatureObject const * hunterCreature = nullptr;
+	if (!JavaLibrary::getObject(hunter, hunterCreature) || !hunterCreature->isPlayerControlled() || !hunterCreature->isInWorld())
+		return JNI_FALSE;
+	SkillObject const * const investigationThree = SkillManager::getInstance().getSkill(cms_investigationThreeSkill);
+	if (investigationThree == nullptr || !hunterCreature->hasSkill(*investigationThree))
+		return JNI_FALSE;
+	PlayerObject const * const hunterPlayer = PlayerCreatureController::getPlayerObject(hunterCreature);
+	if (hunterPlayer == nullptr)
+		return JNI_FALSE;
+	int missionCooldownUntil = 0;
+	std::string const missionCooldownObjvar = cms_bountyMissionCooldownPrefix + targetId.getValueString();
+	if (!jediManager->hasBountyOnJedi(targetId, hunterId) &&
+		hunterCreature->getObjVars().getItem(missionCooldownObjvar, missionCooldownUntil) &&
+		missionCooldownUntil > static_cast<int>(Os::getRealSystemTime()))
+		return JNI_FALSE;
+	uint32 const targetStationId = NameManager::getInstance().getPlayerStationId(targetId);
+	if (hunterPlayer->getStationId() != 0 && hunterPlayer->getStationId() == targetStationId)
+		return JNI_FALSE;
+
+	SwgCreatureObject const * const localTarget = dynamic_cast<SwgCreatureObject const *>(
+		NetworkIdManager::getObjectById(targetId));
+	if (localTarget != nullptr && localTarget->isAuthoritative())
+	{
+		int lastBountyKillTime = 0;
+		if (localTarget->getObjVars().getItem(cms_lastBountyKillObjvar, lastBountyKillTime) &&
+			static_cast<long long>(lastBountyKillTime) + cms_bountyKillBufferSeconds >
+				static_cast<long long>(Os::getRealSystemTime()))
+			return JNI_FALSE;
+		int smugglerBounty = 0;
+		bool const taggedSmuggler = localTarget->getObjVars().getItem(cms_smugglerBountyObjvar, smugglerBounty) &&
+			smugglerBounty > 0;
+		PlayerObject const * const targetPlayer = PlayerCreatureController::getPlayerObject(localTarget);
+		bool const visibleTitleJedi = localTarget->hasPreCuJediTitle() && targetPlayer != nullptr &&
+			safe_cast<SwgPlayerObject const *>(targetPlayer)->getJediVisibility() >= cms_minimumJediBountyVisibility;
+		if (!localTarget->isPlayerControlled() || !localTarget->isInWorld() ||
+			targetPlayer == nullptr || (!visibleTitleJedi && !taggedSmuggler))
+			return JNI_FALSE;
+	}
 
 	JavaStringParam jsuccessCallback(successCallback);
 	std::string successCallbackString;
@@ -909,6 +967,43 @@ void JNICALL ScriptMethodsJediNamespace::updateJediScriptData(JNIEnv * env, jobj
 	std::string dataName;
 	if (!JavaLibrary::convert(JavaStringParam(name), dataName))
 		return;
+	if (dataName == cms_smugglerScriptData || dataName == cms_smugglerBountyValueScriptData ||
+		dataName == cms_bountyKillBufferScriptData)
+	{
+		CreatureObject const * targetCreature = nullptr;
+		if (!JavaLibrary::getObject(target, targetCreature))
+			return;
+		SwgCreatureObject const * const swgTarget = safe_cast<SwgCreatureObject const *>(targetCreature);
+		if (dataName == cms_bountyKillBufferScriptData)
+		{
+			int lastBountyKillTime = 0;
+			bool const hasLastKill = swgTarget->getObjVars().getItem(cms_lastBountyKillObjvar, lastBountyKillTime) &&
+				lastBountyKillTime > 0;
+			bool const killBufferExpired = !hasLastKill ||
+				static_cast<long long>(lastBountyKillTime) + cms_bountyKillBufferSeconds <=
+					static_cast<long long>(Os::getRealSystemTime());
+			if (killBufferExpired && value == 0)
+			{
+				jediManager->removeJediScriptData(targetId, dataName);
+				return;
+			}
+			if (!hasLastKill || value != lastBountyKillTime + cms_bountyKillBufferSeconds)
+				return;
+			jediManager->updateJediScriptData(targetId, dataName, value);
+			return;
+		}
+		int smugglerBounty = 0;
+		bool const taggedSmuggler = swgTarget->getObjVars().getItem(cms_smugglerBountyObjvar, smugglerBounty) &&
+			smugglerBounty > 0;
+		if (!taggedSmuggler && value == 0)
+		{
+			jediManager->removeJediScriptData(targetId, dataName);
+			return;
+		}
+		bool const exactValue = dataName == cms_smugglerScriptData ? value == 1 : value == smugglerBounty;
+		if (!taggedSmuggler || !exactValue)
+			return;
+	}
 
 	jediManager->updateJediScriptData(targetId, dataName, value);
 }	// JavaLibrary::updateJediScriptData
@@ -936,7 +1031,27 @@ void JNICALL ScriptMethodsJediNamespace::removeJediScriptData(JNIEnv * env, jobj
 	std::string dataName;
 	if (!JavaLibrary::convert(JavaStringParam(name), dataName))
 		return;
+	if (dataName == cms_smugglerScriptData || dataName == cms_smugglerBountyValueScriptData ||
+		dataName == cms_bountyKillBufferScriptData)
+	{
+		CreatureObject const * targetCreature = nullptr;
+		if (!JavaLibrary::getObject(target, targetCreature))
+			return;
+		SwgCreatureObject const * const swgTarget = safe_cast<SwgCreatureObject const *>(targetCreature);
+		if (dataName == cms_bountyKillBufferScriptData)
+		{
+			int lastBountyKillTime = 0;
+			if (swgTarget->getObjVars().getItem(cms_lastBountyKillObjvar, lastBountyKillTime) &&
+				static_cast<long long>(lastBountyKillTime) + cms_bountyKillBufferSeconds >
+					static_cast<long long>(Os::getRealSystemTime()))
+				return;
+			jediManager->removeJediScriptData(targetId, dataName);
+			return;
+		}
+		int smugglerBounty = 0;
+		if (swgTarget->getObjVars().getItem(cms_smugglerBountyObjvar, smugglerBounty) && smugglerBounty > 0)
+			return;
+	}
 
 	jediManager->removeJediScriptData(targetId, dataName);
 }	// JavaLibrary::removeJediScriptData
-

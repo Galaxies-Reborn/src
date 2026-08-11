@@ -12,10 +12,52 @@
 #include "serverGame/PlayerObject.h"
 #include "serverGame/ServerCreatureObjectTemplate.h"
 #include "serverNetworkMessages/MessageToPayload.h"
+#include "sharedSkillSystem/SkillObject.h"
 #include "SwgGameServer/JediManagerObject.h"
 #include "SwgGameServer/SwgPlayerCreatureController.h"
 #include "SwgGameServer/SwgPlayerObject.h"
 #include "SwgGameServer/SwgServerUniverse.h"
+
+#include <algorithm>
+#include <climits>
+
+
+namespace SwgCreatureObjectNamespace
+{
+	char const * const cms_jediTitleSkill = "force_title_jedi_rank_02";
+	char const * const cms_jediDisciplinePrefix = "force_discipline";
+	char const * const cms_forceRankObjvar = "force_rank.rank";
+	char const * const cms_smugglerBountyObjvar = "smuggler.bounty";
+	char const * const cms_smugglerScriptData = "smuggler";
+	char const * const cms_smugglerBountyScriptData = "smugglerBountyValue";
+
+	bool startsWith(std::string const & value, char const * const prefix)
+	{
+		return value.find(prefix) == 0;
+	}
+
+	bool affectsPreCuJediRegistry(std::string const & skillName)
+	{
+		return skillName == cms_jediTitleSkill ||
+			startsWith(skillName, cms_jediDisciplinePrefix);
+	}
+
+	JediState getRegistryJediState(SwgCreatureObject const & creature)
+	{
+		PlayerObject const * const player = PlayerCreatureController::getPlayerObject(&creature);
+		if (player != nullptr)
+		{
+			SwgPlayerObject const * const swgPlayer = safe_cast<SwgPlayerObject const *>(player);
+			if (swgPlayer->getJediState() == JS_forceRankedLight)
+				return JS_forceRankedLight;
+			if (swgPlayer->getJediState() == JS_forceRankedDark)
+				return JS_forceRankedDark;
+		}
+		return JS_jedi;
+	}
+}
+
+using namespace SwgCreatureObjectNamespace;
 
 
 //----------------------------------------------------------------------
@@ -93,10 +135,10 @@ float SwgCreatureObject::alter(float time)
 void SwgCreatureObject::onRemovingFromWorld()
 {
 	// if we are a Jedi, flag ourself as offline
-	if (isAuthoritative() && isPlayerControlled() && (getBountyValue() > 0))
+	if (isAuthoritative() && isPlayerControlled())
 	{
 		JediManagerObject * const jediManager = static_cast<SwgServerUniverse &>(ServerUniverse::getInstance()).getJediManager();
-		if (jediManager != nullptr)
+		if (jediManager != nullptr && jediManager->isJediRegistered(getNetworkId()))
 		{
 			jediManager->setJediOffline(getNetworkId(), getPosition_w(), getSceneId());
 		}
@@ -113,10 +155,10 @@ void SwgCreatureObject::onRemovingFromWorld()
 void SwgCreatureObject::onPermanentlyDestroyed()
 {
 	// if we are a Jedi, remove ourself from the Jedi manager
-	if (isAuthoritative() && isPlayerControlled() && (getBountyValue() > 0))
+	if (isAuthoritative() && isPlayerControlled())
 	{
 		JediManagerObject * const jediManager = static_cast<SwgServerUniverse &>(ServerUniverse::getInstance()).getJediManager();
-		if (jediManager != nullptr)
+		if (jediManager != nullptr && jediManager->isJediRegistered(getNetworkId()))
 		{
 			jediManager->removeJedi(getNetworkId());
 		}
@@ -144,18 +186,22 @@ void SwgCreatureObject::handleCMessageTo (const MessageToPayload &message)
 */
 bool SwgCreatureObject::isJedi(void) const
 {
-	if (!isPlayerControlled())
-		return false;
-	
-	PlayerObject const * const player = PlayerCreatureController::getPlayerObject(this);
-	if (player)
-	{
-		SwgPlayerObject const * const swgPlayer = safe_cast<SwgPlayerObject const *>(player);
-		return swgPlayer->isJedi();
-	}
-
-	return false;
+	return isPlayerControlled() && hasPreCuJediTitle();
 }	// SwgCreatureObject::isJedi
+
+//-----------------------------------------------------------------------
+
+bool SwgCreatureObject::hasPreCuJediTitle(void) const
+{
+	SkillList const & skills = getSkillList();
+	for (SkillList::const_iterator i = skills.begin(); i != skills.end(); ++i)
+	{
+		SkillObject const * const skill = *i;
+		if (skill != nullptr && skill->getSkillName() == cms_jediTitleSkill)
+			return true;
+	}
+	return false;
+}
 
 //-----------------------------------------------------------------------
 
@@ -166,14 +212,13 @@ const int SwgCreatureObject::getSpentJediSkillPoints() const
 {
 	int result = 0;
 
-	/* skill points no longer exist
 	const SkillList & skills = getSkillList();
 	for (SkillList::const_iterator i = skills.begin(); i != skills.end(); ++i)
 	{
 		if (*i) 
 		{
-			// per Dave White, we only care about skills starting with "force_discipline"
-			if ((*i)->getSkillName().find("force_discipline") == 0)
+			// Publish 14 counts only the force_discipline trees.
+			if (startsWith((*i)->getSkillName(), cms_jediDisciplinePrefix))
 				result += (*i)->getSkillPointCost();
 		}
 		else
@@ -181,9 +226,18 @@ const int SwgCreatureObject::getSpentJediSkillPoints() const
 			WARNING(true, ("Creature %s had a nullptr in their skill list", getNetworkId().getValueString().c_str()));
 		}
 	}
-	*/
 	return result;
 }	// SwgCreatureObject::getSpentJediSkillPoints
+
+//----------------------------------------------------------------------
+
+int SwgCreatureObject::getPreCuForceRank() const
+{
+	int rank = 0;
+	if (!getObjVars().getItem(cms_forceRankObjvar, rank) || rank < 0 || rank > 11)
+		return 0;
+	return rank;
+}
 
 //----------------------------------------------------------------------
 
@@ -239,8 +293,19 @@ std::vector<NetworkId> const & SwgCreatureObject::getJediBountiesOnMe() const
 
 int SwgCreatureObject::getBountyValue() const
 {
-	int bountyValue;
-	if (getObjVars().getItem("bounty.amount", bountyValue))
+	if (hasPreCuJediTitle())
+	{
+		int const forceRank = getPreCuForceRank();
+		long long bountyValue = static_cast<long long>(getSpentJediSkillPoints()) * 1000LL +
+			static_cast<long long>(forceRank) * 100000LL;
+		bountyValue = std::max(25000LL, bountyValue);
+		if (forceRank > 0)
+			bountyValue = std::max(50000LL, bountyValue);
+		return static_cast<int>(std::min(static_cast<long long>(INT_MAX), bountyValue));
+	}
+
+	int bountyValue = 0;
+	if (getObjVars().getItem(cms_smugglerBountyObjvar, bountyValue) && bountyValue > 0)
 		return bountyValue;
 
 	return 0;
@@ -248,16 +313,86 @@ int SwgCreatureObject::getBountyValue() const
 
 //------------------------------------------------------------------------------------------
 
+void SwgCreatureObject::synchronizeJediBountyRegistry()
+{
+	if (!isAuthoritative() || !isPlayerControlled())
+		return;
+
+	SwgPlayerObject * const player = safe_cast<SwgPlayerObject *>(PlayerCreatureController::getPlayerObject(this));
+	if (player == nullptr)
+		return;
+
+	JediManagerObject * const jediManager = static_cast<SwgServerUniverse &>(
+		ServerUniverse::getInstance()).getJediManager();
+	if (jediManager == nullptr)
+		return;
+
+	bool const titleJedi = hasPreCuJediTitle();
+	if (titleJedi)
+	{
+		JediState const registryState = getRegistryJediState(*this);
+		if (player->getJediState() != registryState)
+		{
+			player->setJediState(registryState);
+			return;
+		}
+	}
+	else if (player->isJedi())
+	{
+		// The exact title skill is the Publish 14 admission authority.  Retain
+		// force sensitivity without leaving a stale Jedi registry state.
+		player->setJediState(JS_forceSensitive);
+		return;
+	}
+
+	int smugglerBounty = 0;
+	bool const smuggler = getObjVars().getItem(cms_smugglerBountyObjvar, smugglerBounty) &&
+		smugglerBounty > 0;
+	if (!titleJedi && !smuggler)
+	{
+		if (jediManager->isJediRegistered(getNetworkId()))
+			jediManager->removeJedi(getNetworkId());
+		return;
+	}
+
+	int const bountyValue = titleJedi ? getBountyValue() : smugglerBounty;
+	int const visibility = titleJedi ? player->getJediVisibility() : 0;
+	JediState const registryState = titleJedi ? getRegistryJediState(*this) : JS_none;
+	jediManager->addJedi(getNetworkId(), getObjectName(), getPosition_w(), getSceneId(),
+		visibility, bountyValue, 0, 0, registryState, getSpentJediSkillPoints(), getPvpFaction());
+
+	if (smuggler)
+	{
+		jediManager->updateJediScriptData(getNetworkId(), cms_smugglerScriptData, 1);
+		jediManager->updateJediScriptData(getNetworkId(), cms_smugglerBountyScriptData, smugglerBounty);
+	}
+	else
+	{
+		jediManager->removeJediScriptData(getNetworkId(), cms_smugglerScriptData);
+		jediManager->removeJediScriptData(getNetworkId(), cms_smugglerBountyScriptData);
+	}
+
+	if (!isInWorld())
+		jediManager->setJediOffline(getNetworkId(), getPosition_w(), getSceneId());
+}
+
+//------------------------------------------------------------------------------------------
+
 const bool SwgCreatureObject::grantSkill(const SkillObject & newSkill)
 {
-	return CreatureObject::grantSkill(newSkill);
+	bool const result = CreatureObject::grantSkill(newSkill);
+	if (result && isAuthoritative() && affectsPreCuJediRegistry(newSkill.getSkillName()))
+		synchronizeJediBountyRegistry();
+	return result;
 }	// SwgCreatureObject::grantSkill
 
 //-----------------------------------------------------------------------
 
-void SwgCreatureObject::revokeSkill(const SkillObject & oldSkill)
+void SwgCreatureObject::revokeSkill(const SkillObject & oldSkill, bool silent)
 {
-	CreatureObject::revokeSkill(oldSkill);
+	CreatureObject::revokeSkill(oldSkill, silent);
+	if (isAuthoritative() && !hasSkill(oldSkill) && affectsPreCuJediRegistry(oldSkill.getSkillName()))
+		synchronizeJediBountyRegistry();
 }	// SwgCreatureObject::revokeSkill
 
 //------------------------------------------------------------------------------------------
@@ -265,27 +400,7 @@ void SwgCreatureObject::revokeSkill(const SkillObject & oldSkill)
 void SwgCreatureObject::endBaselines()
 {
 	CreatureObject::endBaselines();
-
-	// if the player has a bounty value, register him with the bounty manager
-	if (isAuthoritative() && isPlayerControlled())
-	{
-		int bountyValue = getBountyValue();
-		if (bountyValue > 0)
-		{
-			SwgPlayerObject const * player = safe_cast<SwgPlayerObject const *>(PlayerCreatureController::getPlayerObject(this));
-			if (player)
-			{
-				JediManagerObject * jediManager = static_cast<SwgServerUniverse &>(ServerUniverse::getInstance()).getJediManager();
-				if (jediManager)
-				{
-					jediManager->addJedi(getNetworkId(), getObjectName(),
-						getPosition_w(), getSceneId(), player->getJediVisibility(),
-						bountyValue, 0,
-						0, player->getJediState(), getSpentJediSkillPoints(), getPvpFaction());
-				}
-			}
-		}
-	}
+	synchronizeJediBountyRegistry();
 }
 
 //------------------------------------------------------------------------------------------
@@ -293,14 +408,7 @@ void SwgCreatureObject::endBaselines()
 void SwgCreatureObject::onAddedToWorld()
 {
 	CreatureObject::onAddedToWorld();
-	if (isAuthoritative() && isPlayerControlled() && (getBountyValue() > 0))
-	{
-		JediManagerObject * jediManager = static_cast<SwgServerUniverse &>(ServerUniverse::getInstance()).getJediManager();
-		if (jediManager != nullptr)
-		{
-			jediManager->updateJediLocation(getNetworkId(), getPosition_w(), getSceneId());
-		}
-	}
+	synchronizeJediBountyRegistry();
 }
 
 //------------------------------------------------------------------------------------------
@@ -309,14 +417,13 @@ void SwgCreatureObject::levelChanged() const
 {
 	CreatureObject::levelChanged();
 
-	// If the player has a bounty value, update the level with the bounty manager
+	// Combat level is retired in PRE-CU; keep registry payloads level-neutral.
 	if (isAuthoritative() && isPlayerControlled() && (getBountyValue() > 0))
 	{
-		JediManagerObject * jediManager = static_cast<SwgServerUniverse &>(ServerUniverse::getInstance()).getJediManager();
-		if (jediManager)
-		{
+		JediManagerObject * const jediManager = static_cast<SwgServerUniverse &>(
+			ServerUniverse::getInstance()).getJediManager();
+		if (jediManager != nullptr)
 			jediManager->updateJedi(getNetworkId(), -1, -1, 0, -1);
-		}
 	}
 }
 
@@ -327,12 +434,6 @@ void SwgCreatureObject::setPvpFaction(Pvp::FactionId factionId)
 	Pvp::FactionId oldId = getPvpFaction();
 	CreatureObject::setPvpFaction(factionId);
 	Pvp::FactionId newId = getPvpFaction();
-	if ((oldId != newId) && isAuthoritative() && isPlayerControlled() && (getBountyValue() > 0))
-	{
-		JediManagerObject * jediManager = static_cast<SwgServerUniverse &>(ServerUniverse::getInstance()).getJediManager();
-		if (jediManager != nullptr)
-		{
-			jediManager->updateJediFaction(getNetworkId(), newId);
-		}
-	}
+	if ((oldId != newId) && isAuthoritative() && isPlayerControlled())
+		synchronizeJediBountyRegistry();
 }

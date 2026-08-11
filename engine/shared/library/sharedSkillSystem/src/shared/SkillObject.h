@@ -41,6 +41,7 @@ public:
 	const SpeciesFlagVector &                   getPrerequisiteSpecies          () const;
 	const SkillObject *                         getPrevSkill                    () const;
 	const std::string &                         getSkillName                    () const;
+	int                                         getSkillPointCost               () const;
 	const GenericModVector &                    getStatisticModifiers           () const;
 	const bool                                  hasCommand                      (const std::string & commandName) const;
 	const bool                                  isProfession                    () const;
@@ -67,6 +68,7 @@ public:
 
 		// descriptors
 		std::string                                 skillName;
+		int                                         skillPointCost;
 		SkillVector                                 nextSkillBoxes;
 		const SkillObject *                         prevSkill;
 
@@ -88,6 +90,7 @@ private:
 	SkillData skillData;
 
 	static const std::string ms_skillLabel;
+	static const std::string ms_skillPointCostLabel;
 	static const std::string ms_prerequisiteSkillsLabel;
 	static const std::string ms_prerequisiteExperienceTypeLabel;
 	static const std::string ms_prerequisiteExperienceAmountLabel;

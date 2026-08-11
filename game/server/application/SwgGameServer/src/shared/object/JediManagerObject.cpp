@@ -13,6 +13,7 @@
 #include "serverGame/ConfigServerGame.h"
 #include "serverGame/GameServer.h"
 #include "serverGame/MessageToQueue.h"
+#include "serverGame/NameManager.h"
 #include "serverGame/PlayerObject.h"
 #include "serverNetworkMessages/BountyHunterTargetListMessage.h"
 #include "serverNetworkMessages/BountyHunterTargetMessage.h"
@@ -20,9 +21,12 @@
 #include "serverScript/ScriptDictionary.h"
 #include "serverScript/ScriptParameters.h"
 #include "sharedFoundation/GameControllerMessage.h"
+#include "sharedFoundation/Os.h"
 #include "sharedLog/Log.h"
 #include "sharedNetworkMessages/MessageQueueGenericValueType.h"
 #include "sharedObject/NetworkIdManager.h"
+#include "sharedSkillSystem/SkillManager.h"
+#include "sharedSkillSystem/SkillObject.h"
 #include "SwgGameServer/JediManagerController.h"
 #include "SwgGameServer/ServerJediManagerObjectTemplate.h"
 #include "SwgGameServer/SwgCreatureObject.h"
@@ -40,6 +44,17 @@ static const int IGNORE_JEDI_STAT = INT_MAX;
 
 namespace JediManagerObjectNamespace
 {
+	char const * const cms_smugglerBountyObjvar = "smuggler.bounty";
+	char const * const cms_smugglerScriptData = "smuggler";
+	char const * const cms_smugglerBountyValueScriptData = "smugglerBountyValue";
+	char const * const cms_bountyKillBufferScriptData = "precuBountyKillBufferUntil";
+	char const * const cms_lastBountyKillObjvar = "bounty.precuLastKillTime";
+	char const * const cms_bountyMissionCooldownPrefix = "bounty.precuMissionCooldown.";
+	char const * const cms_investigationThreeSkill = "combat_bountyhunter_investigation_03";
+	int const cms_minimumJediBountyVisibility = 1500;
+	int const cms_bountyKillBufferSeconds = 30 * 60;
+	size_t const cms_maximumActiveHunters = 5;
+
 	// the bounty hunter target list loaded from the DB; we store it here
 	// and wait until the JediManagerObject object is created, and then
 	// read it into the JediManagerObject object
@@ -807,13 +822,17 @@ void JediManagerObject::updateJediScriptData(const NetworkId & id, const std::st
 		const int index = (indexIter == m_jediId.end() ? -1 : indexIter->second);
 		if (index >= 0)
 		{
-			LOG("CustomerService", ("Jedi: Updating script data on Jedi %s. Data "
-				"name = %s, value = %d", PlayerObject::getAccountDescription(id).c_str(),
-				name.c_str(), value));
 			char buffer[1024];
 			if (snprintf(buffer, sizeof(buffer), "%d|%s", index, name.c_str()) > 0)
 			{
-				m_jediScriptData.set(buffer, value);
+				Archive::AutoDeltaMap<std::string, int>::const_iterator const existing = m_jediScriptData.find(buffer);
+				if (existing == m_jediScriptData.end() || existing->second != value)
+				{
+					LOG("CustomerService", ("Jedi: Updating script data on Jedi %s. Data "
+						"name = %s, value = %d", PlayerObject::getAccountDescription(id).c_str(),
+						name.c_str(), value));
+					m_jediScriptData.set(buffer, value);
+				}
 				m_jediScriptDataNames.insert(name);
 			}
 		}
@@ -855,12 +874,15 @@ void JediManagerObject::removeJediScriptData(const NetworkId & id, const std::st
 		const int index = (indexIter == m_jediId.end() ? -1 : indexIter->second);
 		if (index >= 0)
 		{
-			LOG("CustomerService", ("Jedi: Removing script data on Jedi %s. Data "
-				"name = %s", PlayerObject::getAccountDescription(id).c_str(),
-				name.c_str()));
 			char buffer[1024];
 			snprintf(buffer, sizeof(buffer), "%d|%s", index, name.c_str());
-			m_jediScriptData.erase(buffer);
+			if (m_jediScriptData.find(buffer) != m_jediScriptData.end())
+			{
+				LOG("CustomerService", ("Jedi: Removing script data on Jedi %s. Data "
+					"name = %s", PlayerObject::getAccountDescription(id).c_str(),
+					name.c_str()));
+				m_jediScriptData.erase(buffer);
+			}
 		}
 		else
 		{
@@ -880,6 +902,109 @@ void JediManagerObject::removeJediScriptData(const NetworkId & id, const std::st
 	if (ConfigServerGame::getForceJediConcludes())
 		addObjectToConcludeList();
 }	// JediManagerObject::removeJediScriptData
+
+// ----------------------------------------------------------------------
+
+bool JediManagerObject::isJediRegistered(const NetworkId & id) const
+{
+	return m_jediId.find(id) != m_jediId.end();
+}
+
+// ----------------------------------------------------------------------
+
+int JediManagerObject::getJediScriptDataValue(int index, std::string const & name) const
+{
+	if (index < 0 || static_cast<size_t>(index) >= m_jediName.size())
+		return 0;
+
+	char buffer[1024];
+	snprintf(buffer, sizeof(buffer), "%d|%s", index, name.c_str());
+	Archive::AutoDeltaMap<std::string, int>::const_iterator const result = m_jediScriptData.find(buffer);
+	return result != m_jediScriptData.end() ? result->second : 0;
+}
+
+// ----------------------------------------------------------------------
+
+int JediManagerObject::getSmugglerBountyValue(int index) const
+{
+	int const separateReward = getJediScriptDataValue(index, cms_smugglerBountyValueScriptData);
+	if (separateReward > 0)
+		return separateReward;
+
+	// Pre-migration non-Jedi Smuggler rows stored their reward in the single
+	// registry bounty field.  Title Jedi never use that compatibility fallback.
+	bool const titleJedi = (m_jediState[index] & (JS_jedi | JS_forceRankedLight | JS_forceRankedDark)) != 0;
+	return !titleJedi && m_jediBountyValue[index] > 0 ? m_jediBountyValue[index] : 0;
+}
+
+// ----------------------------------------------------------------------
+
+bool JediManagerObject::isSmugglerBountyEntry(int index) const
+{
+	if (index < 0 || static_cast<size_t>(index) >= m_jediName.size())
+		return false;
+
+	return getJediScriptDataValue(index, cms_smugglerScriptData) == 1 && getSmugglerBountyValue(index) > 0;
+}
+
+// ----------------------------------------------------------------------
+
+bool JediManagerObject::hasBountyTargetProvenance(int index) const
+{
+	if (index < 0 || static_cast<size_t>(index) >= m_jediName.size())
+		return false;
+
+	bool const titleJedi = (m_jediState[index] & (JS_jedi | JS_forceRankedLight | JS_forceRankedDark)) != 0;
+	return titleJedi || isSmugglerBountyEntry(index);
+}
+
+// ----------------------------------------------------------------------
+
+bool JediManagerObject::isAvailableBountyTarget(int index) const
+{
+	if (!hasBountyTargetProvenance(index) || m_jediName[index].empty() ||
+		!m_jediOnline[index] || m_jediBountyValue[index] <= 0)
+		return false;
+	if (getJediScriptDataValue(index, cms_bountyKillBufferScriptData) > static_cast<int>(Os::getRealSystemTime()))
+		return false;
+
+	bool const titleJedi = (m_jediState[index] & (JS_jedi | JS_forceRankedLight | JS_forceRankedDark)) != 0;
+	bool const smuggler = isSmugglerBountyEntry(index);
+	NetworkId targetId = NetworkId::cms_invalid;
+	for (Archive::AutoDeltaMap<NetworkId, int>::const_iterator i = m_jediId.begin(); i != m_jediId.end(); ++i)
+	{
+		if (i->second == index)
+		{
+			targetId = i->first;
+			break;
+		}
+	}
+	SwgCreatureObject const * const target = dynamic_cast<SwgCreatureObject const *>(
+		NetworkIdManager::getObjectById(targetId));
+	if (target != nullptr && target->isAuthoritative())
+	{
+		if (!target->isPlayerControlled() || !target->isInWorld())
+			return false;
+		int lastBountyKillTime = 0;
+		if (target->getObjVars().getItem(cms_lastBountyKillObjvar, lastBountyKillTime) &&
+			static_cast<long long>(lastBountyKillTime) + cms_bountyKillBufferSeconds >
+				static_cast<long long>(Os::getRealSystemTime()))
+			return false;
+
+		int localSmugglerBounty = 0;
+		bool const localSmuggler = target->getObjVars().getItem(cms_smugglerBountyObjvar, localSmugglerBounty) &&
+			localSmugglerBounty > 0;
+		if (target->hasPreCuJediTitle())
+		{
+			if (!titleJedi || target->getBountyValue() != m_jediBountyValue[index])
+				return false;
+		}
+		else if (!smuggler || !localSmuggler || localSmugglerBounty != getSmugglerBountyValue(index))
+			return false;
+	}
+
+	return true;
+}
 
 // ----------------------------------------------------------------------
 
@@ -940,7 +1065,8 @@ void JediManagerObject::getJedi(int visibility, int bountyValue, int minLevel, i
 	// check each Jedi to see if they meet the requirements
 	for (Archive::AutoDeltaMap<NetworkId, int>::const_iterator i = m_jediId.begin(); i != m_jediId.end(); ++i)
 	{
-		if (m_jediName[i->second].empty())
+		if (!isAvailableBountyTarget(i->second) ||
+			m_jediBounties[i->second].size() >= cms_maximumActiveHunters)
 			continue;
 
 		// filter out Jedi who don't meet the requirements
@@ -1050,7 +1176,7 @@ void JediManagerObject::getJedi(const NetworkId & id, ScriptParams & returnParam
 {
 	Archive::AutoDeltaMap<NetworkId, int>::const_iterator const indexIter = m_jediId.find(id);
 	const int index = (indexIter == m_jediId.end() ? -1 : indexIter->second);
-	if (index < 0)
+	if (index < 0 || !hasBountyTargetProvenance(index) || m_jediBountyValue[index] <= 0)
 		return;
 
 	returnParams.addParam(id, "id");
@@ -1228,11 +1354,52 @@ void JediManagerObject::requestJediBounty(const NetworkId & targetId,
 		if (index >= 0)
 		{
 			bounties = m_jediBounties[index].size();
-			if (bounties < ConfigServerGame::getMaxJediBounties())
+			bool const alreadyHunting = std::find(m_jediBounties[index].begin(),
+				m_jediBounties[index].end(), hunterId) != m_jediBounties[index].end();
+			bool const visibleTitleJedi =
+				(m_jediState[index] & (JS_jedi | JS_forceRankedLight | JS_forceRankedDark)) != 0 &&
+				m_jediVisibility[index] >= cms_minimumJediBountyVisibility;
+			bool validTarget = targetId != hunterId && isAvailableBountyTarget(index) &&
+				(visibleTitleJedi || isSmugglerBountyEntry(index)) &&
+				(alreadyHunting || m_jediBounties[index].size() < cms_maximumActiveHunters);
+			uint32 const hunterStationId = NameManager::getInstance().getPlayerStationId(hunterId);
+			uint32 const targetStationId = NameManager::getInstance().getPlayerStationId(targetId);
+			if (hunterStationId != 0 && hunterStationId == targetStationId)
+				validTarget = false;
+			if (hunterStationId != 0)
+			{
+				for (std::vector<NetworkId>::const_iterator i = m_jediBounties[index].begin();
+					i != m_jediBounties[index].end(); ++i)
+				{
+					if (*i != hunterId && NameManager::getInstance().getPlayerStationId(*i) == hunterStationId)
+					{
+						validTarget = false;
+						break;
+					}
+				}
+			}
+
+			SwgCreatureObject const * const hunter = dynamic_cast<SwgCreatureObject const *>(
+				NetworkIdManager::getObjectById(hunterId));
+			if (hunter != nullptr && hunter->isAuthoritative())
+			{
+				SkillObject const * const investigationThree = SkillManager::getInstance().getSkill(cms_investigationThreeSkill);
+				if (!hunter->isPlayerControlled() || !hunter->isInWorld() || investigationThree == nullptr ||
+					!hunter->hasSkill(*investigationThree))
+					validTarget = false;
+
+				int missionCooldownUntil = 0;
+				std::string const missionCooldownObjvar = cms_bountyMissionCooldownPrefix + targetId.getValueString();
+				if (!alreadyHunting && hunter->getObjVars().getItem(missionCooldownObjvar, missionCooldownUntil) &&
+					missionCooldownUntil > static_cast<int>(Os::getRealSystemTime()))
+					validTarget = false;
+			}
+
+			if (validTarget)
 			{
 				success = true;
 				// only add the hunter to the list if he isn't on there already
-				if (std::find(m_jediBounties[index].begin(), m_jediBounties[index].end(), hunterId) == m_jediBounties[index].end())
+				if (!alreadyHunting)
 				{
 					std::vector<NetworkId> hunters = m_jediBounties[index];
 					hunters.push_back(hunterId);

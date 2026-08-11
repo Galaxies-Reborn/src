@@ -91,17 +91,10 @@ void SwgPlayerObject::virtualOnSetAuthority()
 {
 	PlayerObject::virtualOnSetAuthority();
 
-	const SwgCreatureObject * owner = safe_cast<const SwgCreatureObject *>(getCreatureObject());
-	if ((owner != nullptr) && owner->isPlayerControlled() && (owner->getBountyValue() > 0))
+	SwgCreatureObject * const owner = safe_cast<SwgCreatureObject *>(getCreatureObject());
+	if (owner != nullptr && owner->isPlayerControlled())
 	{
-		// tell the Jedi manager our position
-		JediManagerObject * jediManager = static_cast<SwgServerUniverse &>(
-			ServerUniverse::getInstance()).getJediManager();
-		if (jediManager != nullptr)
-		{
-			jediManager->updateJediLocation(owner->getNetworkId(), 
-				owner->getPosition_w(), owner->getSceneId());
-		}
+		owner->synchronizeJediBountyRegistry();
 		m_updateJediLocationTime = 0;
 	}
 }	// SwgPlayerObject::virtualOnSetAuthority
@@ -158,6 +151,10 @@ void SwgPlayerObject::setJediState(JediState state)
 			{
 				setJediVisibility(0);
 			}
+
+			SwgCreatureObject * const owner = safe_cast<SwgCreatureObject *>(getCreatureObject());
+			if (owner != nullptr)
+				owner->synchronizeJediBountyRegistry();
 		}
 		else
 		{
@@ -189,16 +186,14 @@ void SwgPlayerObject::updateJediLocationTime(float time)
 		{
 			m_updateJediLocationTime = 0;
 
-			// tell the Jedi manager our position
-			JediManagerObject * jediManager = static_cast<SwgServerUniverse &>(
-				ServerUniverse::getInstance()).getJediManager();
-			if (jediManager != nullptr)
+			SwgCreatureObject * const owner = safe_cast<SwgCreatureObject *>(getCreatureObject());
+			if (owner != nullptr && owner->isInWorld())
 			{
-				const CreatureObject * owner = getCreatureObject();
-				if (owner->isInWorld())
+				JediManagerObject * const jediManager = static_cast<SwgServerUniverse &>(
+					ServerUniverse::getInstance()).getJediManager();
+				if (jediManager != nullptr)
 				{
-					jediManager->updateJediLocation(owner->getNetworkId(), 
-						owner->getPosition_w(), owner->getSceneId());
+					jediManager->updateJediLocation(owner->getNetworkId(), owner->getPosition_w(), owner->getSceneId());
 				}
 			}
 		}
@@ -214,13 +209,17 @@ void SwgPlayerObject::updateJediLocationTime(float time)
  */
 void SwgPlayerObject::setJediVisibility(int visibility)
 {
-	if (!isJedi())
+	SwgCreatureObject * const owner = safe_cast<SwgCreatureObject *>(getCreatureObject());
+	if (owner == nullptr || !owner->hasPreCuJediTitle())
 		return;
 
 	if (visibility < 0)
 		visibility = 0;
+	else if (visibility > 8000)
+		visibility = 8000;
 
 	setObjVarItem(OBJVAR_JEDI_VISIBILITY, visibility);
+	owner->synchronizeJediBountyRegistry();
 }	// SwgPlayerObject::setJediVisibility
 
 //----------------------------------------------------------------------
@@ -232,7 +231,8 @@ void SwgPlayerObject::setJediVisibility(int visibility)
  */
 int SwgPlayerObject::getJediVisibility(void) const
 {
-	if (!isJedi())
+	SwgCreatureObject const * const owner = safe_cast<SwgCreatureObject const *>(getCreatureObject());
+	if (owner == nullptr || !owner->hasPreCuJediTitle())
 		return 0;
 
 	int visibility;
@@ -240,7 +240,7 @@ int SwgPlayerObject::getJediVisibility(void) const
 	{
 		WARNING(true, ("Jedi %s doesn't have a visibility objvar, adding one", 
 			getNetworkId().getValueString().c_str()));
-		const_cast<SwgPlayerObject *>(this)->setJediVisibility(0);
+		const_cast<SwgPlayerObject *>(this)->setObjVarItem(OBJVAR_JEDI_VISIBILITY, 0);
 		return 0;
 	}
 	return visibility;
@@ -371,4 +371,3 @@ bool SwgPlayerObject::isJedi() const
 {
 	return (getJediState() & (JS_jedi | JS_forceRankedLight | JS_forceRankedDark)) != 0;
 }
-

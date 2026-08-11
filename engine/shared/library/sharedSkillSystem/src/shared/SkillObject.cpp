@@ -15,6 +15,7 @@
 #include <algorithm>
 
 const std::string SkillObject::ms_skillLabel                        = "NAME";
+const std::string SkillObject::ms_skillPointCostLabel               = "POINTS_REQUIRED";
 const std::string SkillObject::ms_prerequisiteSkillsLabel           = "SKILLS_REQUIRED";
 const std::string SkillObject::ms_prerequisiteExperienceTypeLabel   = "XP_TYPE";
 const std::string SkillObject::ms_prerequisiteExperienceAmountLabel = "XP_COST";
@@ -68,6 +69,7 @@ prerequisiteExperience         (),
 prerequisiteSpecies            (),
 prerequisiteFactionStanding    (),
 skillName                      ("UNINITIALIZED SKILL"),
+skillPointCost                 (0),
 nextSkillBoxes                 (),
 prevSkill                      (0),
 commandsProvided               (),
@@ -87,6 +89,7 @@ prerequisiteExperience        (source.prerequisiteExperience),
 prerequisiteSpecies           (source.prerequisiteSpecies),
 prerequisiteFactionStanding   (source.prerequisiteFactionStanding),
 skillName                     (source.skillName),
+skillPointCost                (source.skillPointCost),
 nextSkillBoxes                (source.nextSkillBoxes),
 prevSkill                     (0),
 commandsProvided              (source.commandsProvided),
@@ -115,6 +118,7 @@ SkillObject::SkillData & SkillObject::SkillData::operator = (const SkillData & r
 		prerequisiteSpecies =            rhs.prerequisiteSpecies;
 		prerequisiteFactionStanding =    rhs.prerequisiteFactionStanding;
 		skillName =                      rhs.skillName;
+		skillPointCost =                 rhs.skillPointCost;
 		nextSkillBoxes =                 rhs.nextSkillBoxes;
 		commandsProvided =               rhs.commandsProvided;
 		schematicsGranted =              rhs.schematicsGranted;
@@ -203,6 +207,13 @@ const SkillObject::SkillVector & SkillObject::getPrerequisiteSkills() const
 const std::string & SkillObject::getSkillName() const
 {
 	return skillData.skillName;
+}
+
+//---------------------------------------------------------------------
+
+int SkillObject::getSkillPointCost() const
+{
+	return skillData.skillPointCost;
 }
 
 //---------------------------------------------------------------------
@@ -470,6 +481,9 @@ bool SkillObject::load(DataTable & dataTable, const std::string & skillName)
 	skillData = SkillData();
 	
 	skillData.skillName = skillName;
+	int const skillPointCostColumn = dataTable.findColumnNumber(SkillObject::ms_skillPointCostLabel);
+	if (skillPointCostColumn >= 0)
+		skillData.skillPointCost = dataTable.getIntValue(skillPointCostColumn, skillRow);
 	
 	loadPrerequisiteSkills      (dataTable, skillRow);
 	loadPrerequisiteExperience  (dataTable, skillRow);

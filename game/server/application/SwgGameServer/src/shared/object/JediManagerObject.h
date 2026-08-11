@@ -47,6 +47,7 @@ public:
 	void updateJediFaction(const NetworkId & id, int faction);
 	void updateJediScriptData(const NetworkId & id, const std::string & name, int value);
 	void removeJediScriptData(const NetworkId & id, const std::string & name);
+	bool isJediRegistered(const NetworkId & id) const;
 
 	void getJedi(int visibility, int bountyValue, int minLevel, int maxLevel, int hoursAlive, int bounties, int state, ScriptParams & returnParams) const;
 	void getJedi(const NetworkId & id, ScriptParams & returnParams) const;
@@ -72,6 +73,11 @@ private:
 	JediManagerObject & operator=(const JediManagerObject&);
 
 	void adjustBountyCount(NetworkId const & hunterId, int adjustment);
+	int getJediScriptDataValue(int index, std::string const & name) const;
+	int getSmugglerBountyValue(int index) const;
+	bool isSmugglerBountyEntry(int index) const;
+	bool hasBountyTargetProvenance(int index) const;
+	bool isAvailableBountyTarget(int index) const;
 
 private:
 	// most of the jedi information are kept in vectors, which makes it very expensive
