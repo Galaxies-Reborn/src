@@ -81,6 +81,7 @@ public:
 	virtual void onContainerChildGainItem(ServerObject &item, ServerObject *source, ServerObject *transferer);
 	virtual void onContainerLostItem(ServerObject *destination, ServerObject &item, ServerObject *transferer);
 	virtual void onContainerChildLostItem(ServerObject *destination, ServerObject &item, ServerObject *source, ServerObject *transferer);
+	virtual void onContainerTransferComplete(ServerObject *oldContainer, ServerObject *newContainer);
 	virtual bool isVisibleOnClient(const Client & client) const;
 	virtual void onLoadingScreenComplete();
 

@@ -23,6 +23,7 @@
 #include "serverGame/ServerUniverse.h"
 #include "serverGame/ServerWorld.h"
 #include "serverGame/ServerWorldIntangibleNotification.h"
+#include "serverGame/ShipObject.h"
 #include "serverGame/TangibleObject.h"
 #include "serverNetworkMessages/UpdateObjectOnPlanetMessage.h"
 #include "serverScript/GameScriptObject.h"
@@ -33,6 +34,7 @@
 #include "sharedGame/SharedObjectTemplate.h"
 #include "sharedLog/Log.h"
 #include "sharedNetworkMessages/GenericValueTypeMessage.h"
+#include "sharedObject/NetworkIdManager.h"
 #include "sharedObject/ObjectTemplateList.h"
 #include "sharedTerrain/TerrainModificationHelper.h"
 #include "sharedUtility/DataTable.h"
@@ -60,6 +62,13 @@ static const std::string OBJVAR_THEATER_PLAYER(OBJVAR_THEATER_BASE + ".player");
 static const std::string OBJVAR_THEATER_OBJECTS(OBJVAR_THEATER_BASE + ".objects");
 static const std::string OBJVAR_THEATER_NAME(OBJVAR_THEATER_BASE + ".name");
 static const std::string OBJVAR_THEATER_FLATTEN(OBJVAR_THEATER_BASE + ".flatten");
+
+static char const * const OBJVAR_ATMOSPHERIC_SHIP_LINK = "galaxiesReborn.atmosphericShip.ship";
+static char const * const OBJVAR_SHIP_PREVIEW_TEMPLATE = "galaxiesReborn.atmosphericShip.preview.template";
+static char const * const OBJVAR_SHIP_PREVIEW_CUSTOMIZATION = "galaxiesReborn.atmosphericShip.preview.customization";
+static char const * const ATTRIBUTE_SHIP_PREVIEW_ID = "gr_internal_ship_preview_id";
+static char const * const ATTRIBUTE_SHIP_PREVIEW_TEMPLATE = "gr_internal_ship_preview_template";
+static char const * const ATTRIBUTE_SHIP_PREVIEW_CUSTOMIZATION = "gr_internal_ship_preview_customization";
 
 
 // ======================================================================
@@ -924,9 +933,156 @@ bool IntangibleObject::setTheaterName(const std::string & name)
 
 // ----------------------------------------------------------------------
 
+void IntangibleObject::updateShipPreviewSnapshot(ServerObject const & item)
+{
+	if (!isAuthoritative() || getGameObjectType() != SharedObjectTemplate::GOT_data_ship_control_device)
+		return;
+
+	ShipObject const * const ship = item.asShipObject();
+	if (!ship)
+		return;
+
+	NetworkId currentShipId;
+	if (!getObjVars().getItem(OBJVAR_ATMOSPHERIC_SHIP_LINK, currentShipId) || currentShipId != ship->getNetworkId())
+		IGNORE_RETURN(setObjVarItem(OBJVAR_ATMOSPHERIC_SHIP_LINK, ship->getNetworkId()));
+
+	std::string const templateName = ship->getClientSharedTemplateName() ? ship->getClientSharedTemplateName() : "";
+	std::string previousTemplateName;
+	if (!getObjVars().getItem(OBJVAR_SHIP_PREVIEW_TEMPLATE, previousTemplateName) || previousTemplateName != templateName)
+		IGNORE_RETURN(setObjVarItem(OBJVAR_SHIP_PREVIEW_TEMPLATE, templateName));
+
+	std::string const & customization = ship->getAppearanceData();
+	std::string previousCustomization;
+	if (!getObjVars().getItem(OBJVAR_SHIP_PREVIEW_CUSTOMIZATION, previousCustomization) || previousCustomization != customization)
+		IGNORE_RETURN(setObjVarItem(OBJVAR_SHIP_PREVIEW_CUSTOMIZATION, customization));
+}
+
+// ----------------------------------------------------------------------
+
+void IntangibleObject::onContainerGainItem(ServerObject & item, ServerObject * source, ServerObject * transferer)
+{
+	ServerObject::onContainerGainItem(item, source, transferer);
+	updateShipPreviewSnapshot(item);
+}
+
+// ----------------------------------------------------------------------
+
+void IntangibleObject::onContainerLostItem(ServerObject * destination, ServerObject & item, ServerObject * transferer)
+{
+	// Capture the final paint state before the real ship leaves the control
+	// device.  This also bumps the SCD attribute revision when paint changed.
+	updateShipPreviewSnapshot(item);
+	ServerObject::onContainerLostItem(destination, item, transferer);
+}
+
+// ----------------------------------------------------------------------
+
 void IntangibleObject::getAttributes(std::vector<std::pair<std::string, Unicode::String> > &data) const
 {
 	ServerObject::getAttributes(data);
+
+	int const gameObjectType = getGameObjectType();
+	if (gameObjectType == SharedObjectTemplate::GOT_data_ship_control_device)
+	{
+		NetworkId shipId;
+		IGNORE_RETURN(getObjVars().getItem(OBJVAR_ATMOSPHERIC_SHIP_LINK, shipId));
+
+		ShipObject const * ship = 0;
+		Container const * const container = ContainerInterface::getContainer(*this);
+		if (container)
+		{
+			for (ContainerConstIterator iterator = container->begin(); iterator != container->end(); ++iterator)
+			{
+				Object const * const containedObject = (*iterator).getObject();
+				ServerObject const * const containedServerObject = containedObject ? containedObject->asServerObject() : 0;
+				ship = containedServerObject ? containedServerObject->asShipObject() : 0;
+				if (ship)
+					break;
+			}
+		}
+
+		if (!ship && shipId != NetworkId::cms_invalid)
+		{
+			Object const * const linkedObject = NetworkIdManager::getObjectById(shipId);
+			ServerObject const * const linkedServerObject = linkedObject ? linkedObject->asServerObject() : 0;
+			ship = linkedServerObject ? linkedServerObject->asShipObject() : 0;
+		}
+
+		std::string templateName;
+		std::string customization;
+		if (ship)
+		{
+			shipId = ship->getNetworkId();
+			templateName = ship->getClientSharedTemplateName() ? ship->getClientSharedTemplateName() : "";
+			customization = ship->getAppearanceData();
+		}
+		else
+		{
+			IGNORE_RETURN(getObjVars().getItem(OBJVAR_SHIP_PREVIEW_TEMPLATE, templateName));
+			IGNORE_RETURN(getObjVars().getItem(OBJVAR_SHIP_PREVIEW_CUSTOMIZATION, customization));
+		}
+
+		if (shipId != NetworkId::cms_invalid)
+			data.push_back(std::make_pair(ATTRIBUTE_SHIP_PREVIEW_ID, Unicode::narrowToWide(shipId.getValueString())));
+		if (!templateName.empty())
+		{
+			data.push_back(std::make_pair(ATTRIBUTE_SHIP_PREVIEW_TEMPLATE, Unicode::narrowToWide(templateName)));
+			data.push_back(std::make_pair(ATTRIBUTE_SHIP_PREVIEW_CUSTOMIZATION, Unicode::narrowToWide(customization)));
+		}
+		return;
+	}
+
+	if (gameObjectType != SharedObjectTemplate::GOT_data_vehicle_control_device &&
+		gameObjectType != SharedObjectTemplate::GOT_data_pet_control_device &&
+		gameObjectType != SharedObjectTemplate::GOT_data_droid_control_device)
+		return;
+
+	std::string packedCustomization;
+	DynamicVariableList::NestedList const paletteVariables(getObjVars(), "ai.pet.palvar.vars");
+	for (DynamicVariableList::NestedList::const_iterator iterator = paletteVariables.begin(); iterator != paletteVariables.end(); ++iterator)
+	{
+		if (iterator.getType() != DynamicVariable::INT)
+			continue;
+
+		int value = 0;
+		if (!iterator.getValue(value))
+			continue;
+
+		std::string variableName = iterator.getName();
+		size_t const slash = variableName.find('/');
+		if (slash != std::string::npos)
+			variableName = variableName.substr(slash);
+		if (variableName.empty())
+			continue;
+
+		packedCustomization += variableName;
+		packedCustomization += '=';
+		char valueBuffer[32];
+		snprintf(valueBuffer, sizeof(valueBuffer), "%d", value);
+		packedCustomization += valueBuffer;
+		packedCustomization += '\n';
+	}
+
+	auto appendHueObjVar = [this, &packedCustomization](char const * const objVarName, char const * const customizationVariable)
+	{
+		int value = 0;
+		if (!getObjVars().getItem(objVarName, value))
+			return;
+		packedCustomization += customizationVariable;
+		packedCustomization += '=';
+		char valueBuffer[32];
+		snprintf(valueBuffer, sizeof(valueBuffer), "%d", value);
+		packedCustomization += valueBuffer;
+		packedCustomization += '\n';
+	};
+
+	appendHueObjVar("creature_attribs.hue", "/private/index_color_1");
+	appendHueObjVar("beast.hue", "/private/index_color_1");
+	appendHueObjVar("beast.hue2", "/private/index_color_2");
+	appendHueObjVar("beast.hue3", "/private/index_color_3");
+
+	if (!packedCustomization.empty())
+		data.push_back(std::make_pair("gr_internal_preview_customization", Unicode::narrowToWide(packedCustomization)));
 }
 
 // ----------------------------------------------------------------------
@@ -944,4 +1100,3 @@ IntangibleObject const *IntangibleObject::asIntangibleObject() const
 }
 
 // ======================================================================
-

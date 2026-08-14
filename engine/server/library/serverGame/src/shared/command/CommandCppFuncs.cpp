@@ -5242,13 +5242,6 @@ static void commandFuncPurchaseTicket(const Command& /*command*/, const NetworkI
 	const Unicode::String travelPoint2 = Unicode::narrowToWide(underscoreToSpace(nextStringParm(parameters, pos)));
 	const bool roundTrip = nextBoolParm(parameters, pos);
 	const bool instantTravel = nextBoolParm(parameters, pos);
-	if (instantTravel)
-	{
-		LOG("PreCuRestore", ("Ignored retired NGE instant-travel ticket request from %s",
-			actor.getValueString().c_str()));
-		return;
-	}
-
 	ScriptParams scriptParameters;
 	scriptParameters.addParam(actor);
 	scriptParameters.addParam(planetName1);
@@ -5257,7 +5250,10 @@ static void commandFuncPurchaseTicket(const Command& /*command*/, const NetworkI
 	scriptParameters.addParam(travelPoint2);
 	scriptParameters.addParam(roundTrip);
 
-	if (serverObject->getScriptObject()->trigAllScripts(Scripting::TRIG_PURCHASE_TICKET, scriptParameters) != SCRIPT_CONTINUE)
+	Scripting::TrigId const trigger = instantTravel
+		? Scripting::TRIG_PURCHASE_TICKET_INSTANT_TRAVEL
+		: Scripting::TRIG_PURCHASE_TICKET;
+	if (serverObject->getScriptObject()->trigAllScripts(trigger, scriptParameters) != SCRIPT_CONTINUE)
 		DEBUG_REPORT_LOG(true, ("commandFuncPurchaseTicket: did not return SCRIPT_CONTINUE\n"));
 }
 

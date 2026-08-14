@@ -48,6 +48,8 @@ public:
 	virtual bool  isVisibleOnClient (const Client & client) const;
 	virtual void  getAttributes     (std::vector<std::pair<std::string, Unicode::String> > &data) const;
 	virtual bool  onContainerAboutToTransfer(ServerObject * destination, ServerObject* transferer);
+	virtual void  onContainerGainItem(ServerObject & item, ServerObject * source, ServerObject * transferer);
+	virtual void  onContainerLostItem(ServerObject * destination, ServerObject & item, ServerObject * transferer);
 	
 	int  getCount(void) const;
 	void setCount(int value);
@@ -79,6 +81,7 @@ private:
 
 private:
 	void addMembersToPackages();
+	void updateShipPreviewSnapshot(ServerObject const & item);
 
 private:
 	static const SharedObjectTemplate * m_defaultSharedTemplate;	// template to use if no shared template is given

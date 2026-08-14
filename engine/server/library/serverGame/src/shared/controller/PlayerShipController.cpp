@@ -12,9 +12,13 @@
 
 #include "serverGame/AiShipBehaviorDock.h"
 #include "serverGame/ConfigServerGame.h"
+#include "serverGame/ContainerInterface.h"
 #include "serverGame/CreatureObject.h"
 #include "serverGame/PlayerShipTurretTargetingSystem.h"
+#include "serverGame/Region.h"
+#include "serverGame/RegionMaster.h"
 #include "serverGame/ServerShipObjectInterface.h"
+#include "serverGame/ServerWorld.h"
 #include "serverGame/ShipAiEnemySearchManager.h"
 #include "serverGame/ShipClientUpdateTracker.h"
 #include "serverGame/ShipObject.h"
@@ -24,6 +28,7 @@
 #include "sharedDebug/DebugFlags.h"
 #include "sharedFoundation/ConstCharCrcString.h"
 #include "sharedFoundation/GameControllerMessage.h"
+#include "sharedGame/SharedObjectTemplate.h"
 #include "sharedGame/ShipDynamicsModel.h"
 #include "sharedLog/Log.h"
 #include "sharedMathArchive/TransformArchive.h"
@@ -35,9 +40,11 @@
 #include "sharedNetworkMessages/ShipUpdateTransformMessage.h"
 #include "sharedObject/AlterResult.h"
 #include "sharedObject/NetworkIdManager.h"
+#include "sharedTerrain/TerrainObject.h"
 
 #include <limits>
 #include <map>
+#include <vector>
 
 // ======================================================================
 // PlayerShipControllerNamespace
@@ -50,6 +57,79 @@ namespace PlayerShipControllerNamespace
 	void remove();
 
 	float const s_targetedByAiExpireTime = 20.0f;
+	char const * const s_atmosphericActiveObjVar = "galaxiesReborn.atmosphericShip.active";
+	char const * const s_atmosphericWorldVisibleObjVar = "galaxiesReborn.atmosphericShip.worldVisible";
+	char const * const s_atmosphericParkedObjVar = "galaxiesReborn.atmosphericShip.housing.parked";
+	float const s_atmosphericMinimumClearance = 2.0f;
+	// Java performs the ground-to-space handoff at 1000m AGL on a one-second
+	// monitor.  Keep enough headroom that a fast ship cannot skip past the
+	// handoff sample and become trapped against the safety ceiling.
+	float const s_atmosphericMaximumHeight = 1500.0f;
+	float const s_atmosphericRegionSampleDistance = 20.0f;
+
+	bool isAtmosphericGroundShip(ShipObject const &ship)
+	{
+		return !ServerWorld::isSpaceScene() && ship.isInWorld() && ship.getObjVars().hasItem(s_atmosphericActiveObjVar);
+	}
+
+	bool isNoBuildPoint(Vector const &position)
+	{
+		RegionMaster::RegionVector regions;
+		RegionMaster::getRegionsAtPoint(ServerWorld::getSceneId(), position.x, position.z, regions);
+		for (RegionMaster::RegionVector::const_iterator iter = regions.begin(); iter != regions.end(); ++iter)
+		{
+			Region const * const region = *iter;
+			if (region && region->getBuildable() == 0)
+				return true;
+		}
+		return false;
+	}
+
+	bool getTerrainHeight(Vector const &position, float &height)
+	{
+		TerrainObject const * const terrain = TerrainObject::getConstInstance();
+		return terrain && (terrain->getHeight(position, height) || terrain->getHeightForceChunkCreation(position, height));
+	}
+
+	bool isAtmosphericPathAllowed(ShipObject const &ship, Vector const &start, Vector const &end, char const *&failureReason)
+	{
+		if (ship.getObjVars().hasItem(s_atmosphericParkedObjVar))
+		{
+			failureReason = "parked POB ship movement";
+			return false;
+		}
+
+		Vector const delta = end - start;
+		float const distance = delta.magnitude();
+		int sampleCount = clamp(1, static_cast<int>(ceil(distance / s_atmosphericRegionSampleDistance)), 256);
+		for (int sample = 1; sample <= sampleCount; ++sample)
+		{
+			float const fraction = static_cast<float>(sample) / static_cast<float>(sampleCount);
+			Vector const point = start + delta * fraction;
+			if (isNoBuildPoint(point))
+			{
+				failureReason = "entered a no-build region";
+				return false;
+			}
+
+			float terrainHeight = 0.0f;
+			if (getTerrainHeight(point, terrainHeight))
+			{
+				float const heightAboveGround = point.y - terrainHeight;
+				if (heightAboveGround < s_atmosphericMinimumClearance)
+				{
+					failureReason = "below atmospheric terrain clearance";
+					return false;
+				}
+				if (heightAboveGround > s_atmosphericMaximumHeight)
+				{
+					failureReason = "above atmospheric transition ceiling";
+					return false;
+				}
+			}
+		}
+		return true;
+	}
 
 	int syncStampLongDeltaTime(uint32 stamp1, uint32 stamp2)
 	{
@@ -243,6 +323,27 @@ void PlayerShipController::receiveTransform(ShipUpdateTransformMessage const & s
 void PlayerShipController::teleport(Transform const &goal, ServerObject *goalObj)
 {
 	ShipObject * const ship = NON_NULL(getShipOwner());
+	// Packed player ships are volume-contained by their datapad control device,
+	// not attached to a cell.  ServerController::changeCells() can therefore
+	// mistake that null attachment for an object already in the world.  Perform
+	// the explicit containment handoff for atmospheric calls before teleporting.
+	ServerObject * const containingObject = safe_cast<ServerObject *>(ContainerInterface::getContainedByObject(*ship));
+	if (!goalObj &&
+		ship->getObjVars().hasItem(s_atmosphericWorldVisibleObjVar) &&
+		containingObject &&
+		containingObject->getGameObjectType() == SharedObjectTemplate::GOT_data_ship_control_device)
+	{
+		Container::ContainerErrorCode error = Container::CEC_Success;
+		if (!ContainerInterface::transferItemToWorld(*ship, goal, nullptr, error))
+		{
+			WARNING(true, ("Failed to unpack atmospheric ship %s from control device %s (container error %d)",
+				ship->getNetworkId().getValueString().c_str(),
+				containingObject->getNetworkId().getValueString().c_str(),
+				static_cast<int>(error)));
+			return;
+		}
+	}
+
 	Client * const client = ship->getClient();
 
 	if (client && !goalObj)
@@ -262,6 +363,7 @@ void PlayerShipController::teleport(Transform const &goal, ServerObject *goalObj
 	}
 
 	ShipController::teleport(goal, goalObj);
+
 }
 
 // ----------------------------------------------------------------------
@@ -561,11 +663,29 @@ void PlayerShipController::logMoveFail(char const *reasonFmt, ...) const
 
 bool PlayerShipController::checkValidMove(Transform const &transform, Vector const &velocity, float speed, uint32 const currentClientSyncStamp)
 {
-	if (!ConfigServerGame::getShipMoveValidationEnabled())
-		return true;
-
 	ShipObject * const owner = NON_NULL(getShipOwner());
 	Client const * const client = NON_NULL(owner->getClient());
+
+	// Atmospheric boundaries are authoritative even when generic anti-speed
+	// validation is disabled.  Sampling the entire accepted segment prevents
+	// a fast client update from tunneling across a city's no-build region.
+	if (!client->isGod() && isAtmosphericGroundShip(*owner))
+	{
+		char const *failureReason = "invalid atmospheric movement";
+		if (!isAtmosphericPathAllowed(*owner, m_lastVerifiedTransform.getPosition_p(), transform.getPosition_p(), failureReason))
+		{
+			logMoveFail("%s", failureReason);
+			return false;
+		}
+	}
+
+	if (!ConfigServerGame::getShipMoveValidationEnabled())
+	{
+		m_lastVerifiedTransform = transform;
+		m_lastVerifiedSpeed = speed;
+		m_lastVerifiedSyncStamp = currentClientSyncStamp;
+		return true;
+	}
 
 	// gods can move however they like, and assume their moves are valid
 	if (!client->isGod())

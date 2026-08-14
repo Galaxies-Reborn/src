@@ -1473,38 +1473,44 @@ void PlayerCreatureController::handleMessage (const int message, const float val
 						Payload outData;
 						Object const * const buildingO = ContainerInterface::getTopmostContainer(*terminal);
 						ServerObject const * const building = buildingO ? buildingO->asServerObject() : nullptr;
-						if (building) {
+						std::string terminalParkingLocation;
+						if (building)
+						{
 							DynamicVariableList const & buildingObjVars = building->getObjVars();
-							std::string terminalParkingLocation;
-							bool const result = buildingObjVars.getItem("travel.point_name", terminalParkingLocation);
+							IGNORE_RETURN(buildingObjVars.getItem("travel.point_name", terminalParkingLocation));
+						}
+						if (terminalParkingLocation.empty())
+						{
+							DynamicVariableList const & terminalObjVars = terminal->getObjVars();
+							IGNORE_RETURN(terminalObjVars.getItem("travel.point_name", terminalParkingLocation));
+						}
 
-							if (result)
-								outData.push_back(std::make_pair(terminal->getNetworkId(), terminalParkingLocation));
-							else
-								Chat::sendSystemMessage(*owner, Unicode::narrowToWide("(unlocalized) This terminal is not registered with the planet, unexpected behavior may occur."), Unicode::emptyString);
+						// The first entry identifies the terminal.  It is mandatory even for
+						// outdoor terminals or terminals whose launch-point name is absent;
+						// the launch script remains the authority for whether launch is legal.
+						outData.push_back(std::make_pair(terminal->getNetworkId(), terminalParkingLocation));
 
-							std::vector<NetworkId> ships;
-							owner->getAllShipsInDatapad(ships);
-							for (std::vector<NetworkId>::const_iterator i = ships.begin(); i != ships.end(); ++i) {
-								Object const * const shipO = NetworkIdManager::getObjectById(*i);
-								ServerObject const * const shipSO = shipO ? shipO->asServerObject() : nullptr;
-								ShipObject const * const ship = shipSO ? shipSO->asShipObject() : nullptr;
-								if (ship) {
-									ContainedByProperty const * const contained = ship->getContainedByProperty();
-									Object const * const containerO = contained ? contained->getContainedBy() : nullptr;
-									ServerObject const * const container = containerO ? containerO->asServerObject() : nullptr;
-									if(container) {
-										DynamicVariableList const & shipControlDeviceObjVars = container->getObjVars();
-										std::string shipParkingLocation;
-										IGNORE_RETURN(shipControlDeviceObjVars.getItem("strParkingLocation", shipParkingLocation));
-										//push the data in, even if the parking location is empty (empty is acceptable, and used for newly-created ships)
-										outData.push_back(std::make_pair(ship->getNetworkId(), shipParkingLocation));
-									}
+						std::vector<NetworkId> ships;
+						owner->getAllShipsInDatapad(ships);
+						for (std::vector<NetworkId>::const_iterator i = ships.begin(); i != ships.end(); ++i)
+						{
+							Object const * const shipO = NetworkIdManager::getObjectById(*i);
+							ServerObject const * const shipSO = shipO ? shipO->asServerObject() : nullptr;
+							ShipObject const * const ship = shipSO ? shipSO->asShipObject() : nullptr;
+							if (ship)
+							{
+								ContainedByProperty const * const contained = ship->getContainedByProperty();
+								Object const * const containerO = contained ? contained->getContainedBy() : nullptr;
+								ServerObject const * const container = containerO ? containerO->asServerObject() : nullptr;
+								if (container)
+								{
+									DynamicVariableList const & shipControlDeviceObjVars = container->getObjVars();
+									std::string shipParkingLocation;
+									IGNORE_RETURN(shipControlDeviceObjVars.getItem("strParkingLocation", shipParkingLocation));
+									// Empty is valid for a newly-created ship.
+									outData.push_back(std::make_pair(ship->getNetworkId(), shipParkingLocation));
 								}
 							}
-						}
-						else {
-							Chat::sendSystemMessage(*owner, Unicode::narrowToWide("(unlocalized) Could not find building that space terminal is in, cannot resolve parking information."), Unicode::emptyString);
 						}
 						MessageQueueGenericValueType<Payload> * const msg = new MessageQueueGenericValueType<Payload>(outData);
 						appendMessage(static_cast<int>(CM_spaceTerminalResponse), 0.0f, msg, GameControllerMessageFlags::SEND | GameControllerMessageFlags::RELIABLE | GameControllerMessageFlags::DEST_AUTH_CLIENT);
@@ -2481,4 +2487,3 @@ float PlayerCreatureController::getLastSpeed() const
 }
 
 // ======================================================================
-

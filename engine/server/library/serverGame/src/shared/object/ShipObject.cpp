@@ -11,6 +11,7 @@
 #include "UnicodeUtils.h"
 #include "serverGame/AiShipController.h"
 #include "serverGame/Chat.h"
+#include "serverGame/Client.h"
 #include "serverGame/ConfigServerGame.h"
 #include "serverGame/ContainerInterface.h"
 #include "serverGame/CreatureObject.h"
@@ -58,6 +59,7 @@
 #include "sharedNetworkMessages/DeltasMessage.h"
 #include "sharedNetworkMessages/MessageQueueGenericValueType.h"
 #include "sharedNetworkMessages/MessageQueueSpatialChat.h"
+#include "sharedNetworkMessages/UpdateContainmentMessage.h"
 #include "serverNetworkMessages/MessageToPayload.h"
 #include "sharedObject/AlterResult.h"
 #include "sharedObject/NetworkIdManager.h"
@@ -564,8 +566,73 @@ void ShipObject::onContainerChildLostItem(ServerObject *destination, ServerObjec
 
 // ----------------------------------------------------------------------
 
+void ShipObject::onContainerTransferComplete(ServerObject *oldContainer, ServerObject *newContainer)
+{
+	TangibleObject::onContainerTransferComplete(oldContainer, newContainer);
+
+	// A called atmospheric ship is already known to its owner as an object
+	// contained by the datapad control device.  Moving that same persistent
+	// object into the world therefore cannot rely on a fresh SceneCreate for
+	// the owner.  Re-run visibility admission at the authoritative containment
+	// boundary so every nearby client receives the world transition regardless
+	// of which controller initiated the transfer.
+	if (!newContainer &&
+		oldContainer &&
+		oldContainer->getGameObjectType() == SharedObjectTemplate::GOT_data_ship_control_device &&
+		getObjVars().hasItem("galaxiesReborn.atmosphericShip.worldVisible") &&
+		isInWorld())
+	{
+		std::vector<ServerObject *> observers;
+		ServerWorld::findPlayerCreaturesInRange(getPosition_w(), getFarNetworkUpdateRadius(), observers);
+		unsigned int refreshedExistingObservers = 0;
+		for (std::vector<ServerObject *>::const_iterator iter = observers.begin(); iter != observers.end(); ++iter)
+		{
+			Client * const client = (*iter) ? (*iter)->getClient() : 0;
+			if (client && ObserveTracker::isObserving(*client, *this))
+			{
+				// A normal create omits UpdateContainment when the object is in the
+				// world (invalid container, arrangement -1).  This client already
+				// owns the same object inside its ship control device, so omitting
+				// that otherwise-redundant message leaves it client-side contained
+				// and therefore invisible.  Explicitly detach it before refreshing
+				// its authoritative scene transform and baselines.
+				UpdateContainmentMessage const worldContainment(
+					getNetworkId(), NetworkId::cms_invalid, -1);
+				client->send(worldContainment, true);
+
+				// The owner already observes this object through the datapad, so the
+				// normal visibility admission intentionally sends no create.  Queue a
+				// fresh create/baseline: GroundScene's existing-object path applies
+				// its authoritative world transform without replacing its identity.
+				sendCreateAndBaselinesToClient(*client);
+				++refreshedExistingObservers;
+			}
+		}
+		ObserveTracker::onObjectMadeVisibleTo(*this, observers);
+		WARNING(true, ("Atmospheric ship %s entered ground world template=%s position=(%g,%g,%g) observers=%u refreshed=%u",
+			getNetworkId().getValueString().c_str(),
+			getClientSharedTemplateName(),
+			getPosition_w().x,
+			getPosition_w().y,
+			getPosition_w().z,
+			static_cast<unsigned int>(observers.size()),
+			refreshedExistingObservers));
+	}
+}
+
+// ----------------------------------------------------------------------
+
 bool ShipObject::isVisibleOnClient(Client const &client) const
 {
+	// Called and permanently parked atmospheric ships are real persistent
+	// ShipObjects.  They explicitly opt in to ordinary ground-world
+	// visibility.  Test this before TangibleObject's ordinary visibility gate:
+	// a packed ship retains its retail invisible flag when it leaves the SCD,
+	// and that flag otherwise prevents ObserveTracker from ever creating the
+	// exact ship model for nearby ground clients.
+	if (getObjVars().hasItem("galaxiesReborn.atmosphericShip.worldVisible"))
+		return true;
+
 	if (!TangibleObject::isVisibleOnClient(client))
 		return false;
 
@@ -2614,4 +2681,3 @@ void ShipObject::stopFiringWeapon(int weaponIndex)
 }
 
 // ======================================================================
-
