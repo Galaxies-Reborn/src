@@ -171,6 +171,8 @@ set(SHARED_SOURCES
 	shared/console/ConsoleCommandParserVeteran.h
 	shared/console/ConsoleCommandParserVoice.cpp
 	shared/console/ConsoleCommandParserVoice.h
+	shared/console/ConsoleCommandParserWebAdmin.cpp
+	shared/console/ConsoleCommandParserWebAdmin.h
 	shared/console/ConsoleManager.cpp
 	shared/console/ConsoleManager.h
 	shared/console/ObjectCommandParserGetAttributes.cpp

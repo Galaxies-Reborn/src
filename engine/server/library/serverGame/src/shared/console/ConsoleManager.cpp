@@ -35,6 +35,7 @@
 #include "serverGame/ConsoleCommandParserSpawner.h"
 #include "serverGame/ConsoleCommandParserVeteran.h"
 #include "serverGame/ConsoleCommandParserVoice.h"
+#include "serverGame/ConsoleCommandParserWebAdmin.h"
 #include "serverGame/GameServer.h"
 #include "serverGame/ServerObject.h"
 #include "serverGame/ServerWorld.h"
@@ -73,6 +74,7 @@ void ConsoleMgr::install()
 		ms_parser->addSubCommand(new ConsoleCommandParserCollection   ());
 		ms_parser->addSubCommand(new ConsoleCommandParserVoice        ());
 		ms_parser->addSubCommand(new ConsoleCommandParserCity         ());
+		ms_parser->addSubCommand(new ConsoleCommandParserWebAdmin     ());
 	}
 }	// ConsoleMgr::install
 
