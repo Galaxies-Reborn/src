@@ -45,7 +45,12 @@ bool CentralCommandParserGame::performParsing (const NetworkId &, const StringVe
 {
 	LOG("ServerConsole", ("Parsing ServerConsole command."));
 	bool retval = false;
-	if(! argv.empty())
+	// argv is "game <routing> <command> ...", so the command is argv[2] and
+	// anything shorter has none. `empty()` was not enough: CentralServer
+	// forwards a bare "game any" -- size 2 -- and indexing argv[2] on it is out
+	// of bounds on a std::vector, which reads whatever follows the buffer and
+	// dispatches on it.
+	if(argv.size() > 2)
 	{
 		std::string cmd = Unicode::wideToNarrow(argv[2]);
 		LOG("ServerConsole", ("Attempting to execute command '%s'.", cmd.c_str()) );
