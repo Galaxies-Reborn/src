@@ -213,10 +213,13 @@ bool CentralCommandParserGame::performParsing (const NetworkId &, const StringVe
 			static ConsoleCommandParserWebAdmin webAdminParser;
 
 			// CentralServer parsed the command once already and forwarded the
-			// whole thing, so argv still carries the "game any" routing prefix.
-			// Rebuild the command the parser expects to see from argv[2] on.
+			// whole thing, so argv still carries the "game any webadmin"
+			// prefix. Rebuild from argv[3]: parse() is being called on the
+			// webadmin node itself rather than on a root, so it reads the first
+			// token as a *sub*command. Passing "webadmin" back to it produces
+			// "webadmin webadmin: Command not found."
 			Unicode::String forwarded;
-			for(unsigned int i = 2; i < argv.size(); ++i)
+			for(unsigned int i = 3; i < argv.size(); ++i)
 			{
 				if(! forwarded.empty())
 					forwarded += Unicode::narrowToWide(" ");
