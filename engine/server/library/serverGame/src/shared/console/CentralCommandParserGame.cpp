@@ -8,6 +8,7 @@
 #include "serverGame/CentralCommandParserGame.h"
 
 #include "serverGame/Chat.h"
+#include "serverGame/ConsoleCommandParserWebAdmin.h"
 #include "serverGame/ConfigServerGame.h"
 #include "serverGame/GameServer.h"
 #include "serverGame/ObjectTracker.h"
@@ -195,6 +196,36 @@ bool CentralCommandParserGame::performParsing (const NetworkId &, const StringVe
 			ServerMessageForwarding::send(reloadDatatableMessage);
 
 			ServerMessageForwarding::end();
+		}
+		else if( cmd == "webadmin" )
+		{
+			// The web dashboard's commands have to live here, not on ConsoleMgr.
+			// ConsoleMgr's vocabulary -- object, money, skill and the rest -- is
+			// only reachable from an in-game GM client, because Client.cpp is
+			// what calls processString and it needs a Client to answer to. A
+			// command arriving from ServerConsole comes through
+			// CentralConnection and is dispatched to *this* parser instead, so
+			// anything registered on ConsoleMgr is unreachable from outside the
+			// cluster no matter how it is spelled.
+			//
+			// The parser is a static local so its allowlist is built once, on
+			// first use, rather than on every forwarded command.
+			static ConsoleCommandParserWebAdmin webAdminParser;
+
+			// CentralServer parsed the command once already and forwarded the
+			// whole thing, so argv still carries the "game any" routing prefix.
+			// Rebuild the command the parser expects to see from argv[2] on.
+			Unicode::String forwarded;
+			for(unsigned int i = 2; i < argv.size(); ++i)
+			{
+				if(! forwarded.empty())
+					forwarded += Unicode::narrowToWide(" ");
+				forwarded += argv[i];
+			}
+
+			retval = (webAdminParser.parse(NetworkId::cms_invalid, forwarded, result) == CommandParser::ERR_SUCCESS);
+			if(! retval && result.empty())
+				result += Unicode::narrowToWide("webadmin: unknown subcommand\n");
 		}
 		else if( cmd == "public" )
 		{
