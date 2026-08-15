@@ -57,12 +57,17 @@ void ServerConsole::run()
 	{
 		std::string input;
 		char inBuf[1024] = {"\0"};
-		while(! feof(stdin))
+		// fread's element size must be 1, not the buffer size. Asking for one
+		// 1024-byte element returns 0 for any short read, and a command is
+		// almost always short -- so every command under 1 KB was read into the
+		// buffer and then thrown away, and the console answered "Nothing to
+		// send to the server" no matter what it was given. Counting bytes also
+		// means embedded NULs cannot truncate the command, which appending a
+		// char array did.
+		size_t bytesRead = 0;
+		while ((bytesRead = fread(inBuf, 1, sizeof(inBuf), stdin)) > 0)
 		{
-			if (fread(inBuf, 1024, 1, stdin)) {
-				input += inBuf;
-				memset(inBuf, 0, sizeof(inBuf));
-			}
+			input.append(inBuf, bytesRead);
 		}
 
 		if(input.length() > 0)
