@@ -158,13 +158,19 @@ bool ConsoleCommandParserWebAdmin::performParsing (const NetworkId & userId, con
 		{
 			const LfgCharacterData &character = i->second;
 
+			// displayLocationInSearchResults is a setting the player chose, and
+			// the in-game search honours it. Withhold the location here rather
+			// than in the caller: a second consumer of this command would
+			// otherwise have to know to re-apply it, and would not.
+			const bool showLocation = character.displayLocationInSearchResults;
+
 			std::string line = i->first.getValueString();
 			line += c_fieldSeparator;
 			line += Unicode::wideToNarrow(character.characterName);
 			line += c_fieldSeparator;
-			line += character.locationPlanet;
+			line += (showLocation ? character.locationPlanet : std::string());
 			line += c_fieldSeparator;
-			line += character.locationRegion;
+			line += (showLocation ? character.locationRegion : std::string());
 			line += c_fieldSeparator;
 			line += character.guildName;
 			line += c_fieldSeparator;
