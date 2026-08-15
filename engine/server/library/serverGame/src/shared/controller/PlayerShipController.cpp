@@ -333,9 +333,14 @@ void PlayerShipController::teleport(Transform const &goal, ServerObject *goalObj
 		containingObject &&
 		containingObject->getGameObjectType() == SharedObjectTemplate::GOT_data_ship_control_device)
 	{
+		// Reuse the SceneCreate arrival bit for a terrain-only vertical descent.
+		// The x64 client distinguishes ground from space and never invokes the
+		// horizontal hyperspace controller for this atmospheric call path.
+		ship->setHyperspaceOnCreate(true);
 		Container::ContainerErrorCode error = Container::CEC_Success;
 		if (!ContainerInterface::transferItemToWorld(*ship, goal, nullptr, error))
 		{
+			ship->setHyperspaceOnCreate(false);
 			WARNING(true, ("Failed to unpack atmospheric ship %s from control device %s (container error %d)",
 				ship->getNetworkId().getValueString().c_str(),
 				containingObject->getNetworkId().getValueString().c_str(),

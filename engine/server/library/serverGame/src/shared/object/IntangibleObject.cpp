@@ -962,6 +962,9 @@ void IntangibleObject::updateShipPreviewSnapshot(ServerObject const & item)
 void IntangibleObject::onContainerGainItem(ServerObject & item, ServerObject * source, ServerObject * transferer)
 {
 	ServerObject::onContainerGainItem(item, source, transferer);
+	ShipObject * const ship = item.asShipObject();
+	if (ship)
+		ship->setHyperspaceOnCreate(false);
 	updateShipPreviewSnapshot(item);
 }
 
