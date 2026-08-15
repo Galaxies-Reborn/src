@@ -217,38 +217,44 @@ bool CentralCommandParserGame::performParsing (const NetworkId &, const StringVe
 			// first use, rather than on every forwarded command.
 			static ConsoleCommandParserWebAdmin webAdminParser;
 
-			// performParsing directly, NOT parse().
+			// The parser hangs off a root of its own rather than being invoked
+			// directly, and this goes through parse() rather than
+			// performParsing, so the permission manager still gets a say.
 			//
-			// parse() runs the permission manager first, and
-			// ServerCommandPermissionManager only lets a console command
-			// through when the command path is exactly "game" -- otherwise it
-			// resolves userId to a ServerObject and refuses when there is none.
-			// A console command has no invoking character, and this parser is
-			// not rooted under the "game" node, so its path is the bare
-			// subcommand name and every command would be answered
-			// "grantCredits: Permission denied." while never running. Worse,
-			// that reply names no failure keyword, so the caller would read it
-			// as success.
+			// Both details matter. CommandParser builds the permission path by
+			// walking m_parent upward, so a parser with no parent produces a
+			// bare leaf name like "grantCredits" -- too generic to write a
+			// security rule against, and it matches nothing
+			// ServerCommandPermissionManager allows, so every command was
+			// refused. With this root the path is "webadmin.<command>", which
+			// the manager recognises and gates on the same console-only rule it
+			// applies to "game": refused outright if a Client is attached.
 			//
-			// The permission decision has already been made: this branch only
-			// runs because the "game" node itself was allowed.
-			//
-			// The cost is that parse()'s minimum-argument check is skipped too,
-			// so each handler validates its own argv length.
-			CommandParser::StringVector_t forwarded;
-			forwarded.reserve(argv.size() - 3);
-			for(unsigned int i = 3; i < argv.size(); ++i)
-				forwarded.push_back(argv[i]);
+			// Calling performParsing directly would skip that check entirely.
+			// It would also skip parse()'s minimum-argument enforcement.
+			static CommandParser * const webAdminRoot = []() -> CommandParser * {
+				CommandParser * const root = new CommandParser("", 0, "...", "web dashboard commands", 0);
+				IGNORE_RETURN(root->addSubCommand(new ConsoleCommandParserWebAdmin()));
+				return root;
+			}();
 
-			if(forwarded.empty())
+			// CentralServer parsed the command once already and forwarded the
+			// whole thing, so argv still carries the "game <routing>" prefix.
+			// Rebuild from argv[2] -- the "webadmin" token included, because
+			// that is the subcommand the root dispatches on.
+			Unicode::String forwarded;
+			for(unsigned int i = 2; i < argv.size(); ++i)
 			{
-				result += Unicode::narrowToWide("webadmin: no subcommand given\n");
+				if(! forwarded.empty())
+					forwarded += Unicode::narrowToWide(" ");
+				forwarded += argv[i];
 			}
-			else
-			{
-				retval = webAdminParser.performParsing(
-					NetworkId::cms_invalid, forwarded, originalMessage, result, &webAdminParser);
-			}
+
+			const CommandParser::ErrorType outcome =
+				webAdminRoot->parse(NetworkId::cms_invalid, forwarded, result);
+			retval = (outcome == CommandParser::ERR_SUCCESS);
+			if(result.empty())
+				result += webAdminRoot->getFullErrorMessage(outcome);
 		}
 		else if( cmd == "public" )
 		{

@@ -44,6 +44,30 @@ bool ServerCommandPermissionManager::isCommandAllowed (const NetworkId & userId,
 	// commands sent from the ServerConsole program don't have a client associated from them
 	// although it is possible to  resolve to a ServerObject
 	std::string cmd = Unicode::wideToNarrow(commandPath);
+
+	// Commands the external web dashboard uses. They are held to exactly the
+	// same rule as "game" below, and for the same reason: a ServerConsole
+	// command has no Client, so the presence of one means a logged-in player is
+	// driving the admin console rather than an operator, and that is refused
+	// however the command is spelled.
+	//
+	// Matched on the "webadmin." prefix rather than by listing every
+	// subcommand, so adding one cannot silently arrive ungated -- and matched
+	// on a prefix that includes the dot, so it cannot be widened by a parser
+	// that merely starts with those letters.
+	if( cmd.rfind("webadmin.", 0) == 0 )
+	{
+		ServerObject * const webAdminUser = ServerWorld::findObjectByNetworkId(userId);
+		if( !webAdminUser || !webAdminUser->getClient() )
+		{
+			LOG("ServerCommandPermissionManager", ("Allowing web dashboard command '%s'.", cmd.c_str()) );
+			return true;
+		}
+
+		LOG("ServerCommandPermissionManager", ("Disallowing web dashboard command '%s' because it has a Client associated with it.", cmd.c_str()));
+		return false;
+	}
+
 	if( cmd == "game" )
 	{
 		ServerObject * tmpu = ServerWorld::findObjectByNetworkId(userId);
