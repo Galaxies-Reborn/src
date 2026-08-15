@@ -19,6 +19,8 @@
 #include "sharedMath/Vector.h"
 #include "sharedObject/CachedNetworkId.h"
 #include "sharedObject/NetworkIdManager.h"
+#include "sharedSkillSystem/SkillManager.h"
+#include "sharedSkillSystem/SkillObject.h"
 #include "UnicodeUtils.h"
 
 #include <map>
@@ -34,6 +36,13 @@ static const CommandParser::CmdInfo cmds[] =
 	{"vendorSetTax",      3, "<vendor oid> <percent> <bank oid>",       "Set a vendor's sales tax and the account it pays into."},
 	{"vendorSetEntrance", 2, "<vendor oid> <credits>",                  "Set a vendor's entrance charge."},
 	{"vendorSetSearch",   2, "<vendor oid> <on|off>",                   "Set whether a vendor appears in bazaar searches."},
+	{"grantCredits",      3, "<oid> <amount> <account>",               "Move credits between a character's bank and a named account."},
+	{"grantXp",           3, "<oid> <type> <amount>",                  "Grant or remove experience. Negative amounts remove."},
+	{"createItem",        2, "<container oid> <template>",             "Create an object inside a container."},
+	{"destroyItem",       1, "<oid>",                                  "Permanently destroy an object."},
+	{"inventoryOf",       1, "<oid>",                                  "The inventory container id for a character."},
+	{"grantSkill",        2, "<oid> <skill>",                          "Grant a skill to a character."},
+	{"revokeSkill",       2, "<oid> <skill>",                          "Revoke a skill from a character."},
 	{"", 0, "", ""} // this must be last
 };
 
@@ -283,6 +292,181 @@ bool ConsoleCommandParserWebAdmin::performParsing (const NetworkId & userId, con
 		result += Unicode::narrowToWide(
 			FormattedString<128>().sprintf("search for %s set to %s\n",
 				vendor->getNetworkId().getValueString().c_str(), enabled ? "on" : "off"));
+		return true;
+	}
+
+	//-----------------------------------------------------------------
+	// Credits, experience and items.
+	//
+	// The stock console already does all three, but only for a GM logged into
+	// the game: those handlers resolve the *invoking* character and act
+	// relative to it, and `money` calls WARNING_STRICT_FATAL when that lookup
+	// fails. A command arriving from ServerConsole has no invoking character
+	// at all, so they cannot be reused and are restated here against an
+	// explicit target.
+
+	if (isAbbrev(argv[0], "grantCredits"))
+	{
+		ServerObject *const target = dynamic_cast<ServerObject *>(NetworkIdManager::getObjectById(NetworkId(Unicode::wideToNarrow(argv[1]))));
+		if (!target)
+		{
+			result += getErrorMessage(argv[0], ERR_INVALID_OBJECT);
+			return true;
+		}
+
+		const int amount = atoi(Unicode::wideToNarrow(argv[2]).c_str());
+		if (amount == 0)
+		{
+			result += getErrorMessage(argv[0], ERR_INVALID_ARGUMENTS);
+			return true;
+		}
+
+		// Credits are conserved: they are moved to or from a named system
+		// account rather than conjured, so the transaction has somewhere to
+		// point back to.
+		const std::string account = Unicode::wideToNarrow(argv[3]);
+		const bool ok = (amount > 0)
+			? target->transferBankCreditsFrom(account, amount)
+			: target->transferBankCreditsTo(account, -amount);
+
+		result += Unicode::narrowToWide(
+			FormattedString<192>().sprintf("%s %d credits %s %s for %s\n",
+				ok ? "moved" : "failed to move", abs(amount),
+				amount > 0 ? "from" : "to", account.c_str(),
+				target->getNetworkId().getValueString().c_str()));
+		return true;
+	}
+
+	//-----------------------------------------------------------------
+
+	if (isAbbrev(argv[0], "grantXp"))
+	{
+		CreatureObject *const creature = dynamic_cast<CreatureObject *>(NetworkIdManager::getObjectById(NetworkId(Unicode::wideToNarrow(argv[1]))));
+		if (!creature)
+		{
+			result += getErrorMessage(argv[0], ERR_INVALID_OBJECT);
+			return true;
+		}
+
+		const std::string experienceType = Unicode::wideToNarrow(argv[2]);
+		const int amount = atoi(Unicode::wideToNarrow(argv[3]).c_str());
+		const int total = creature->grantExperiencePoints(experienceType, amount);
+
+		result += Unicode::narrowToWide(
+			FormattedString<192>().sprintf("%s now has %d %s\n",
+				creature->getNetworkId().getValueString().c_str(), total, experienceType.c_str()));
+		return true;
+	}
+
+	//-----------------------------------------------------------------
+
+	if (isAbbrev(argv[0], "createItem"))
+	{
+		ServerObject *const container = dynamic_cast<ServerObject *>(NetworkIdManager::getObjectById(NetworkId(Unicode::wideToNarrow(argv[1]))));
+		if (!container)
+		{
+			result += getErrorMessage(argv[0], ERR_INVALID_OBJECT);
+			return true;
+		}
+
+		const std::string templateName = Unicode::wideToNarrow(argv[2]);
+		// Persisted, because an item granted by an administrator that vanishes
+		// on the next restart is worse than one that was never granted.
+		ServerObject *const created = ServerWorld::createNewObject(templateName, *container, true);
+		if (!created)
+		{
+			result += Unicode::narrowToWide("could not create " + templateName + "; check the template path and the container's capacity\n");
+			return true;
+		}
+
+		result += Unicode::narrowToWide(
+			FormattedString<256>().sprintf("created %s as %s in %s\n",
+				templateName.c_str(),
+				created->getNetworkId().getValueString().c_str(),
+				container->getNetworkId().getValueString().c_str()));
+		return true;
+	}
+
+	//-----------------------------------------------------------------
+
+	if (isAbbrev(argv[0], "destroyItem"))
+	{
+		ServerObject *const object = dynamic_cast<ServerObject *>(NetworkIdManager::getObjectById(NetworkId(Unicode::wideToNarrow(argv[1]))));
+		if (!object)
+		{
+			result += getErrorMessage(argv[0], ERR_INVALID_OBJECT);
+			return true;
+		}
+
+		const std::string id = object->getNetworkId().getValueString();
+		const bool ok = object->permanentlyDestroy(DeleteReasons::God);
+		result += Unicode::narrowToWide(
+			FormattedString<128>().sprintf("%s %s\n", ok ? "destroyed" : "failed to destroy", id.c_str()));
+		return true;
+	}
+
+	//-----------------------------------------------------------------
+	// The container id, not the character's: items are created in the
+	// inventory, and the caller has only the character.
+
+	if (isAbbrev(argv[0], "inventoryOf"))
+	{
+		CreatureObject *const creature = dynamic_cast<CreatureObject *>(NetworkIdManager::getObjectById(NetworkId(Unicode::wideToNarrow(argv[1]))));
+		if (!creature)
+		{
+			result += getErrorMessage(argv[0], ERR_INVALID_OBJECT);
+			return true;
+		}
+
+		const ServerObject *const inventory = creature->getInventory();
+		if (!inventory)
+		{
+			result += Unicode::narrowToWide("that character has no inventory container\n");
+			return true;
+		}
+
+		result += Unicode::narrowToWide(inventory->getNetworkId().getValueString() + "\n");
+		return true;
+	}
+
+	//-----------------------------------------------------------------
+	// Skills.
+	//
+	// Same reason as the rest: `skill grantSkill` resolves the invoking
+	// character when no oid is given, and there is no invoking character here.
+	// The target is required rather than optional so it can never silently
+	// fall back to nobody.
+
+	if (isAbbrev(argv[0], "grantSkill") || isAbbrev(argv[0], "revokeSkill"))
+	{
+		CreatureObject *const creature = dynamic_cast<CreatureObject *>(NetworkIdManager::getObjectById(NetworkId(Unicode::wideToNarrow(argv[1]))));
+		if (!creature)
+		{
+			result += getErrorMessage(argv[0], ERR_INVALID_OBJECT);
+			return true;
+		}
+
+		const std::string skillName = Unicode::wideToNarrow(argv[2]);
+		const SkillObject *const skill = SkillManager::getInstance().getSkill(skillName);
+		if (!skill)
+		{
+			// Naming the skill back is the whole diagnostic: the usual cause is
+			// a typo or a skill that does not exist in this build's tree.
+			result += Unicode::narrowToWide("no such skill: " + skillName + "\n");
+			return true;
+		}
+
+		const bool granting = isAbbrev(argv[0], "grantSkill");
+		if (granting)
+			IGNORE_RETURN(creature->grantSkill(*skill));
+		else
+			creature->revokeSkill(*skill);
+
+		result += Unicode::narrowToWide(
+			FormattedString<192>().sprintf("%s %s %s %s\n",
+				granting ? "granted" : "revoked", skillName.c_str(),
+				granting ? "to" : "from",
+				creature->getNetworkId().getValueString().c_str()));
 		return true;
 	}
 
