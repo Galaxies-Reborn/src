@@ -217,23 +217,38 @@ bool CentralCommandParserGame::performParsing (const NetworkId &, const StringVe
 			// first use, rather than on every forwarded command.
 			static ConsoleCommandParserWebAdmin webAdminParser;
 
-			// CentralServer parsed the command once already and forwarded the
-			// whole thing, so argv still carries the "game any webadmin"
-			// prefix. Rebuild from argv[3]: parse() is being called on the
-			// webadmin node itself rather than on a root, so it reads the first
-			// token as a *sub*command. Passing "webadmin" back to it produces
-			// "webadmin webadmin: Command not found."
-			Unicode::String forwarded;
+			// performParsing directly, NOT parse().
+			//
+			// parse() runs the permission manager first, and
+			// ServerCommandPermissionManager only lets a console command
+			// through when the command path is exactly "game" -- otherwise it
+			// resolves userId to a ServerObject and refuses when there is none.
+			// A console command has no invoking character, and this parser is
+			// not rooted under the "game" node, so its path is the bare
+			// subcommand name and every command would be answered
+			// "grantCredits: Permission denied." while never running. Worse,
+			// that reply names no failure keyword, so the caller would read it
+			// as success.
+			//
+			// The permission decision has already been made: this branch only
+			// runs because the "game" node itself was allowed.
+			//
+			// The cost is that parse()'s minimum-argument check is skipped too,
+			// so each handler validates its own argv length.
+			CommandParser::StringVector_t forwarded;
+			forwarded.reserve(argv.size() - 3);
 			for(unsigned int i = 3; i < argv.size(); ++i)
-			{
-				if(! forwarded.empty())
-					forwarded += Unicode::narrowToWide(" ");
-				forwarded += argv[i];
-			}
+				forwarded.push_back(argv[i]);
 
-			retval = (webAdminParser.parse(NetworkId::cms_invalid, forwarded, result) == CommandParser::ERR_SUCCESS);
-			if(! retval && result.empty())
-				result += Unicode::narrowToWide("webadmin: unknown subcommand\n");
+			if(forwarded.empty())
+			{
+				result += Unicode::narrowToWide("webadmin: no subcommand given\n");
+			}
+			else
+			{
+				retval = webAdminParser.performParsing(
+					NetworkId::cms_invalid, forwarded, originalMessage, result, &webAdminParser);
+			}
 		}
 		else if( cmd == "public" )
 		{

@@ -73,6 +73,20 @@ namespace ConsoleCommandParserWebAdminNamespace
 		return ServerWorld::findObjectByNetworkId(vendorId);
 	}
 
+	/**
+	 * Check a command has the arguments it is about to read.
+	 *
+	 * CommandParser::parse() would normally enforce the minimum from the
+	 * CmdInfo table, but this parser is invoked through performParsing directly
+	 * -- see CentralCommandParserGame, which has to skip parse() to get past
+	 * the permission manager. Nothing else stands between a short command and
+	 * an out-of-range argv[], and std::vector does not bounds check.
+	 */
+	bool haveArgs(const CommandParser::StringVector_t &argv, size_t needed)
+	{
+		return argv.size() > needed;
+	}
+
 	bool parseBoolean(const Unicode::String &argument, bool &value)
 	{
 		const std::string text = Unicode::toLower(Unicode::wideToNarrow(argument));
@@ -177,6 +191,12 @@ bool ConsoleCommandParserWebAdmin::performParsing (const NetworkId & userId, con
 
 	if (isAbbrev(argv[0], "warpPlayer"))
 	{
+		if (!haveArgs(argv, 5))
+		{
+			result += getErrorMessage(argv[0], ERR_NOT_ENOUGH_ARGUMENTS);
+			return true;
+		}
+
 		const NetworkId targetId(Unicode::wideToNarrow(argv[1]));
 		ServerObject *const target = dynamic_cast<ServerObject *>(NetworkIdManager::getObjectById(targetId));
 		if (!target)
@@ -197,7 +217,10 @@ bool ConsoleCommandParserWebAdmin::performParsing (const NetworkId & userId, con
 			static_cast<float>(atof(Unicode::wideToNarrow(argv[4]).c_str())),
 			static_cast<float>(atof(Unicode::wideToNarrow(argv[5]).c_str())));
 
-		GameServer::getInstance().requestSceneWarp(
+		// requestSceneWarp answers whether it accepted the request; it refuses
+		// an unknown scene, among other things. Discarding that made every
+		// warp report success, including the ones that never happened.
+		const bool accepted = GameServer::getInstance().requestSceneWarp(
 			CachedNetworkId(*target),
 			sceneName,
 			position,
@@ -205,6 +228,14 @@ bool ConsoleCommandParserWebAdmin::performParsing (const NetworkId & userId, con
 			position,
 			0,
 			false);
+
+		if (!accepted)
+		{
+			result += Unicode::narrowToWide(
+				FormattedString<256>().sprintf("failed to warp %s to %s; check the scene name\n",
+					targetId.getValueString().c_str(), sceneName.c_str()));
+			return true;
+		}
 
 		result += Unicode::narrowToWide(
 			FormattedString<256>().sprintf("warped %s to %s %.2f %.2f %.2f\n",
@@ -222,6 +253,12 @@ bool ConsoleCommandParserWebAdmin::performParsing (const NetworkId & userId, con
 
 	if (isAbbrev(argv[0], "vendorSetTax"))
 	{
+		if (!haveArgs(argv, 3))
+		{
+			result += getErrorMessage(argv[0], ERR_NOT_ENOUGH_ARGUMENTS);
+			return true;
+		}
+
 		ServerObject *const vendor = findVendor(argv[1]);
 		if (!vendor)
 		{
@@ -253,6 +290,12 @@ bool ConsoleCommandParserWebAdmin::performParsing (const NetworkId & userId, con
 
 	if (isAbbrev(argv[0], "vendorSetEntrance"))
 	{
+		if (!haveArgs(argv, 2))
+		{
+			result += getErrorMessage(argv[0], ERR_NOT_ENOUGH_ARGUMENTS);
+			return true;
+		}
+
 		ServerObject *const vendor = findVendor(argv[1]);
 		if (!vendor)
 		{
@@ -273,6 +316,12 @@ bool ConsoleCommandParserWebAdmin::performParsing (const NetworkId & userId, con
 
 	if (isAbbrev(argv[0], "vendorSetSearch"))
 	{
+		if (!haveArgs(argv, 2))
+		{
+			result += getErrorMessage(argv[0], ERR_NOT_ENOUGH_ARGUMENTS);
+			return true;
+		}
+
 		ServerObject *const vendor = findVendor(argv[1]);
 		if (!vendor)
 		{
@@ -307,6 +356,12 @@ bool ConsoleCommandParserWebAdmin::performParsing (const NetworkId & userId, con
 
 	if (isAbbrev(argv[0], "grantCredits"))
 	{
+		if (!haveArgs(argv, 3))
+		{
+			result += getErrorMessage(argv[0], ERR_NOT_ENOUGH_ARGUMENTS);
+			return true;
+		}
+
 		ServerObject *const target = dynamic_cast<ServerObject *>(NetworkIdManager::getObjectById(NetworkId(Unicode::wideToNarrow(argv[1]))));
 		if (!target)
 		{
@@ -341,6 +396,12 @@ bool ConsoleCommandParserWebAdmin::performParsing (const NetworkId & userId, con
 
 	if (isAbbrev(argv[0], "grantXp"))
 	{
+		if (!haveArgs(argv, 3))
+		{
+			result += getErrorMessage(argv[0], ERR_NOT_ENOUGH_ARGUMENTS);
+			return true;
+		}
+
 		CreatureObject *const creature = dynamic_cast<CreatureObject *>(NetworkIdManager::getObjectById(NetworkId(Unicode::wideToNarrow(argv[1]))));
 		if (!creature)
 		{
@@ -350,11 +411,31 @@ bool ConsoleCommandParserWebAdmin::performParsing (const NetworkId & userId, con
 
 		const std::string experienceType = Unicode::wideToNarrow(argv[2]);
 		const int amount = atoi(Unicode::wideToNarrow(argv[3]).c_str());
-		const int total = creature->grantExperiencePoints(experienceType, amount);
+		if (amount == 0)
+		{
+			// atoi cannot tell "0" from unparseable, and granting nothing is
+			// never what the caller meant by either.
+			result += Unicode::narrowToWide("amount must be a non-zero integer\n");
+			return true;
+		}
+
+		// The return is the amount actually granted, not a running total, and
+		// it is 0 when the grant was refused -- a retired NGE progression type,
+		// or a creature with no PlayerObject. Printing it as a total made a
+		// refusal read as a successful grant.
+		const int granted = creature->grantExperiencePoints(experienceType, amount);
+		if (granted == 0)
+		{
+			result += Unicode::narrowToWide(
+				FormattedString<224>().sprintf("no experience granted to %s; %s may not be a valid type for this character\n",
+					creature->getNetworkId().getValueString().c_str(), experienceType.c_str()));
+			return true;
+		}
 
 		result += Unicode::narrowToWide(
-			FormattedString<192>().sprintf("%s now has %d %s\n",
-				creature->getNetworkId().getValueString().c_str(), total, experienceType.c_str()));
+			FormattedString<224>().sprintf("granted %d %s to %s\n",
+				granted, experienceType.c_str(),
+				creature->getNetworkId().getValueString().c_str()));
 		return true;
 	}
 
@@ -362,6 +443,12 @@ bool ConsoleCommandParserWebAdmin::performParsing (const NetworkId & userId, con
 
 	if (isAbbrev(argv[0], "createItem"))
 	{
+		if (!haveArgs(argv, 2))
+		{
+			result += getErrorMessage(argv[0], ERR_NOT_ENOUGH_ARGUMENTS);
+			return true;
+		}
+
 		ServerObject *const container = dynamic_cast<ServerObject *>(NetworkIdManager::getObjectById(NetworkId(Unicode::wideToNarrow(argv[1]))));
 		if (!container)
 		{
@@ -391,10 +478,25 @@ bool ConsoleCommandParserWebAdmin::performParsing (const NetworkId & userId, con
 
 	if (isAbbrev(argv[0], "destroyItem"))
 	{
+		if (!haveArgs(argv, 1))
+		{
+			result += getErrorMessage(argv[0], ERR_NOT_ENOUGH_ARGUMENTS);
+			return true;
+		}
+
 		ServerObject *const object = dynamic_cast<ServerObject *>(NetworkIdManager::getObjectById(NetworkId(Unicode::wideToNarrow(argv[1]))));
 		if (!object)
 		{
 			result += getErrorMessage(argv[0], ERR_INVALID_OBJECT);
+			return true;
+		}
+
+		// Nothing upstream stops an operator pasting a character id here, and
+		// permanentlyDestroy would take it. A player is never an "item".
+		const CreatureObject *const asCreature = object->asCreatureObject();
+		if (asCreature && asCreature->isPlayerControlled())
+		{
+			result += Unicode::narrowToWide("refusing to destroy a player character\n");
 			return true;
 		}
 
@@ -411,6 +513,12 @@ bool ConsoleCommandParserWebAdmin::performParsing (const NetworkId & userId, con
 
 	if (isAbbrev(argv[0], "inventoryOf"))
 	{
+		if (!haveArgs(argv, 1))
+		{
+			result += getErrorMessage(argv[0], ERR_NOT_ENOUGH_ARGUMENTS);
+			return true;
+		}
+
 		CreatureObject *const creature = dynamic_cast<CreatureObject *>(NetworkIdManager::getObjectById(NetworkId(Unicode::wideToNarrow(argv[1]))));
 		if (!creature)
 		{
@@ -439,6 +547,12 @@ bool ConsoleCommandParserWebAdmin::performParsing (const NetworkId & userId, con
 
 	if (isAbbrev(argv[0], "grantSkill") || isAbbrev(argv[0], "revokeSkill"))
 	{
+		if (!haveArgs(argv, 2))
+		{
+			result += getErrorMessage(argv[0], ERR_NOT_ENOUGH_ARGUMENTS);
+			return true;
+		}
+
 		CreatureObject *const creature = dynamic_cast<CreatureObject *>(NetworkIdManager::getObjectById(NetworkId(Unicode::wideToNarrow(argv[1]))));
 		if (!creature)
 		{
