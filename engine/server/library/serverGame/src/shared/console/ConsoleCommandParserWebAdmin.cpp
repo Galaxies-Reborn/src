@@ -54,7 +54,7 @@ static const CommandParser::CmdInfo cmds[] =
 	{"datapadOf",         1, "<oid>",                                  "The datapad container id for a character."},
 	{"giveContainer",     1, "<oid>",                                  "Create a Resource Container in a character's datapad."},
 	{"listContainer",     1, "<container oid>",                        "Contents: id|name|template|count."},
-	{"moveItem",          2, "<item oid> <container oid>",             "Move an item into a container."},
+	{"moveItem",          3, "<item oid> <container oid> <expected source oid>", "Move an item into a container."},
 	{"factoryActivate",   2, "<factory oid> <on|off>",                 "Run or stop a factory as its owner would."},
 	{"factoryHoppers",    1, "<factory oid>",                          "input|output hopper ids."},
 	{"", 0, "", ""} // this must be last
@@ -64,9 +64,36 @@ static const CommandParser::CmdInfo cmds[] =
 
 namespace ConsoleCommandParserWebAdminNamespace
 {
-	// A pipe is safe as a field separator here: character names cannot contain
-	// one, and planet and region names are engine identifiers.
 	const char c_fieldSeparator = '|';
+
+	/**
+	 * Make one field safe to put in a delimited reply.
+	 *
+	 * Player-assigned text cannot be trusted to stay inside its field. The
+	 * danger is not the obvious one: it is that Unicode::wideToNarrow keeps
+	 * only the low byte of each wide character, so an ordinary printable name
+	 * containing U+010A narrows to 0x0A -- a newline -- and U+017C narrows to
+	 * 0x7C, a pipe. A name is therefore able to forge whole extra records in
+	 * the reply.
+	 *
+	 * That matters because the web dashboard uses a container listing to decide
+	 * whether an item is really in a container before it moves it. A forged
+	 * record would let a player move an object they do not own.
+	 *
+	 * Everything outside printable ASCII, plus the separator itself, becomes a
+	 * space. Names are for display; framing is not negotiable.
+	 */
+	std::string sanitiseField(const Unicode::String &text)
+	{
+		std::string narrow = Unicode::wideToNarrow(text);
+		for (std::string::iterator i = narrow.begin(); i != narrow.end(); ++i)
+		{
+			const unsigned char c = static_cast<unsigned char>(*i);
+			if (c < 0x20 || c == 0x7F || *i == c_fieldSeparator)
+				*i = ' ';
+		}
+		return narrow;
+	}
 
 	/**
 	 * Resolve a vendor by object id.
@@ -127,7 +154,7 @@ namespace ConsoleCommandParserWebAdminNamespace
 		{
 			ServerObject *const item = dynamic_cast<ServerObject *>((*i).getObject());
 			if (item && item->getTemplateName() &&
-				strstr(item->getTemplateName(), "container/resource_container") != 0)
+				strstr(item->getTemplateName(), "intangible/container/resource_container") != 0)
 				return item;
 		}
 		return 0;
@@ -212,7 +239,7 @@ bool ConsoleCommandParserWebAdmin::performParsing (const NetworkId & userId, con
 
 			std::string line = i->first.getValueString();
 			line += c_fieldSeparator;
-			line += Unicode::wideToNarrow(character.characterName);
+			line += sanitiseField(character.characterName);
 			line += c_fieldSeparator;
 			line += (showLocation ? character.locationPlanet : std::string());
 			line += c_fieldSeparator;
@@ -688,7 +715,7 @@ bool ConsoleCommandParserWebAdmin::performParsing (const NetworkId & userId, con
 		}
 
 		ServerObject *const created = ServerWorld::createNewObject(
-			"object/tangible/container/resource_container.iff", *datapad, true);
+			"object/intangible/container/resource_container.iff", *datapad, true);
 		if (!created)
 		{
 			result += Unicode::narrowToWide("could not create the container; is the datapad full?\n");
@@ -737,7 +764,7 @@ bool ConsoleCommandParserWebAdmin::performParsing (const NetworkId & userId, con
 
 			std::string line = item->getNetworkId().getValueString();
 			line += c_fieldSeparator;
-			line += Unicode::wideToNarrow(item->getEncodedObjectName());
+			line += sanitiseField(item->getEncodedObjectName());
 			line += c_fieldSeparator;
 			line += (item->getTemplateName() ? item->getTemplateName() : "");
 			line += c_fieldSeparator;
@@ -756,7 +783,7 @@ bool ConsoleCommandParserWebAdmin::performParsing (const NetworkId & userId, con
 
 	if (isAbbrev(argv[0], "moveItem"))
 	{
-		if (!haveArgs(argv, 2))
+		if (!haveArgs(argv, 3))
 		{
 			result += getErrorMessage(argv[0], ERR_NOT_ENOUGH_ARGUMENTS);
 			return true;
@@ -767,6 +794,24 @@ bool ConsoleCommandParserWebAdmin::performParsing (const NetworkId & userId, con
 		if (!item || !destination)
 		{
 			result += getErrorMessage(argv[0], ERR_INVALID_OBJECT);
+			return true;
+		}
+
+		// The caller must say where it believes the item is, and be right.
+		//
+		// Without this the item id is a free-form reference to anything loaded
+		// on the scene, and the only thing standing between a player and
+		// someone else's belongings is the caller's own reading of a container
+		// listing. A listing is text, and text can be forged by a crafted
+		// object name. This check is made against the container the engine
+		// actually records, so it cannot be talked out of.
+		const NetworkId expectedSource(Unicode::wideToNarrow(argv[3]));
+		const Object *const actualSource = ContainerInterface::getContainedByObject(*item);
+		if (!actualSource || actualSource->getNetworkId() != expectedSource)
+		{
+			result += Unicode::narrowToWide(
+				FormattedString<224>().sprintf("that item is not in %s\n",
+					expectedSource.getValueString().c_str()));
 			return true;
 		}
 
