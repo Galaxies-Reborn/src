@@ -22,6 +22,8 @@
 #include "sharedObject/CachedNetworkId.h"
 #include "serverGame/ContainerInterface.h"
 #include "serverGame/InstallationObject.h"
+#include "serverGame/PlayerObject.h"
+#include "serverGame/PlayerCreatureController.h"
 #include "sharedObject/Container.h"
 #include "sharedObject/NetworkIdManager.h"
 #include "sharedObject/SlotIdManager.h"
@@ -53,6 +55,7 @@ static const CommandParser::CmdInfo cmds[] =
 	{"revokeSkill",       2, "<oid> <skill>",                          "Revoke a skill from a character."},
 	{"datapadOf",         1, "<oid>",                                  "The datapad container id for a character."},
 	{"giveContainer",     1, "<oid>",                                  "Create a Resource Container in a character's datapad."},
+	{"shipPartContainer", 1, "<oid>",                                  "Give a character their ship part container."},
 	{"listContainer",     1, "<container oid>",                        "Contents: id|name|template|count."},
 	{"moveItem",          3, "<item oid> <container oid> <expected source oid>", "Move an item into a container."},
 	{"factoryActivate",   2, "<factory oid> <on|off>",                 "Run or stop a factory as its owner would."},
@@ -145,7 +148,7 @@ namespace ConsoleCommandParserWebAdminNamespace
 	 * Found by template rather than by name: a player can rename a container,
 	 * and the dashboard still has to find the same object afterwards.
 	 */
-	ServerObject *findResourceContainer(ServerObject &datapad)
+	ServerObject *findContainerByTemplate(ServerObject &datapad, const char *fragment)
 	{
 		VolumeContainer *const volume = ContainerInterface::getVolumeContainer(datapad);
 		if (!volume)
@@ -154,10 +157,27 @@ namespace ConsoleCommandParserWebAdminNamespace
 		{
 			ServerObject *const item = dynamic_cast<ServerObject *>((*i).getObject());
 			if (item && item->getTemplateName() &&
-				strstr(item->getTemplateName(), "intangible/container/resource_container") != 0)
+				strstr(item->getTemplateName(), fragment) != 0)
 				return item;
 		}
 		return 0;
+	}
+
+	ServerObject *findResourceContainer(ServerObject &datapad)
+	{
+		return findContainerByTemplate(datapad, "intangible/container/resource_container");
+	}
+
+	/**
+	 * A character's ship part container, whatever capacity tier it is.
+	 *
+	 * Matched on the shared stem rather than a full path because the capacity
+	 * is part of the template name -- ship_part_container_1000 through _5000 --
+	 * and an upgraded container is a different object of a different template.
+	 */
+	ServerObject *findShipPartContainer(ServerObject &datapad)
+	{
+		return findContainerByTemplate(datapad, "intangible/container/ship_part_container_");
 	}
 
 	bool parseBoolean(const Unicode::String &argument, bool &value)
@@ -723,6 +743,68 @@ bool ConsoleCommandParserWebAdmin::performParsing (const NetworkId & userId, con
 		}
 
 		result += Unicode::narrowToWide(created->getNetworkId().getValueString() + "\n");
+		return true;
+	}
+
+	//-----------------------------------------------------------------
+
+	if (isAbbrev(argv[0], "shipPartContainer"))
+	{
+		if (!haveArgs(argv, 1))
+		{
+			result += getErrorMessage(argv[0], ERR_NOT_ENOUGH_ARGUMENTS);
+			return true;
+		}
+
+		ServerObject *const character = ServerWorld::findObjectByNetworkId(
+			NetworkId(Unicode::wideToNarrow(argv[1])));
+		if (!character)
+		{
+			result += Unicode::narrowToWide("that character is not loaded; they must be online\n");
+			return true;
+		}
+
+		ServerObject *const datapad = slotOf(*character, "datapad");
+		if (!datapad)
+		{
+			result += Unicode::narrowToWide("that character has no datapad\n");
+			return true;
+		}
+
+		// The account this container belongs to. It is reported so the caller
+		// can key the container to the ACCOUNT rather than to the character --
+		// an object lives in exactly one container, so a single store cannot
+		// literally sit in five datapads at once. It follows whichever
+		// character is playing, which is the closest the engine allows and is
+		// invisible in practice, since one account plays one character at a
+		// time.
+		const CreatureObject *const creature = character->asCreatureObject();
+		const PlayerObject *const player = creature ? PlayerCreatureController::getPlayerObject(creature) : 0;
+		const StationId station = player ? player->getStationId() : 0;
+
+		ServerObject *existing = findShipPartContainer(*datapad);
+		if (!existing)
+		{
+			// New containers start at the smallest tier. The larger templates
+			// exist for the upgrade quests, which will move the contents across
+			// rather than resize -- VolumeContainer takes its limit in the
+			// constructor and has no setter.
+			existing = ServerWorld::createNewObject(
+				"object/intangible/container/ship_part_container_1000.iff", *datapad, true);
+			if (!existing)
+			{
+				result += Unicode::narrowToWide(
+					"could not create the ship part container; is the datapad full?\n");
+				return true;
+			}
+		}
+
+		const VolumeContainer *const volume = ContainerInterface::getVolumeContainer(*existing);
+		result += Unicode::narrowToWide(
+			FormattedString<256>().sprintf("%s%c%lu%c%d\n",
+				existing->getNetworkId().getValueString().c_str(),
+				c_fieldSeparator, static_cast<unsigned long>(station),
+				c_fieldSeparator, volume ? volume->getTotalVolume() : 0));
 		return true;
 	}
 
