@@ -5965,6 +5965,31 @@ void GameServerNamespace::handleMessageLocateStructureByOwnerIdRsp(NetworkId con
 	if (!object)
 		return;
 
+	// Worker Droid discovery deliberately reuses the galaxy-wide structure
+	// locator fan-out.  Deliver privileged records only to the validated server
+	// item script; the script then queries installation targets, which perform
+	// their own owner/type checks before returning status or executing an action.
+	if (object->isAuthoritative() &&
+		object->getScriptObject() &&
+		object->getScriptObject()->hasScript("item.droid.worker_droid"))
+	{
+		std::vector<const char *> records;
+		records.reserve(response.size());
+		for (std::vector<std::string>::const_iterator iter = response.begin(); iter != response.end(); ++iter)
+			records.push_back(iter->c_str());
+
+		ScriptParams params;
+		params.addParam(records, "records");
+		ScriptDictionaryPtr dictionary;
+		GameScriptObject::makeScriptDictionary(params, dictionary);
+		if (dictionary.get() != nullptr)
+		{
+			dictionary->serialize();
+			MessageToQueue::getInstance().sendMessageToJava(responseId, "handleWorkerDroidLocateResponse", dictionary->getSerializedData(), 0, false);
+		}
+		return;
+	}
+
 	Client * const clientObj = object->getClient();
 	if (!clientObj)
 		return;

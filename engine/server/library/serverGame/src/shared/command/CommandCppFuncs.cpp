@@ -910,6 +910,18 @@ static void commandFuncLocateStructure(Command const &, NetworkId const &actor, 
 	if (!actorObj)
 		return;
 
+	// Consume the persistent handoff before checking the client.  If the player
+	// disconnects while the queued command is starting, stale state must not
+	// hijack their next ordinary locateStructure command after login.
+	NetworkId workerDroidId;
+	int playerRequestToken = 0;
+	bool const hasWorkerDroidId = actorObj->getObjVars().getItem("precu.workerDroid.requestor", workerDroidId);
+	bool const hasPlayerRequestToken = actorObj->getObjVars().getItem("precu.workerDroid.requestToken", playerRequestToken);
+	if (hasWorkerDroidId)
+		actorObj->removeObjVarItem("precu.workerDroid.requestor");
+	if (hasPlayerRequestToken)
+		actorObj->removeObjVarItem("precu.workerDroid.requestToken");
+
 	PlayerObject * const playerObj = PlayerCreatureController::getPlayerObject(actorObj);
 	if (!playerObj)
 		return;
@@ -919,10 +931,34 @@ static void commandFuncLocateStructure(Command const &, NetworkId const &actor, 
 		return;
 
 	bool const isGod = clientObj->isGod();
+	bool workerDroidRequest = false;
+	NetworkId responseId = actor;
+	if (hasWorkerDroidId && hasPlayerRequestToken && playerRequestToken > 0)
+	{
+		// The objvar is a one-shot handoff from the server-side Worker Droid
+		// script.  Never trust the id alone: both sides must present the same
+		// nonce, and the item must still be authoritative, carried by this
+		// character, and running the expected script.
+		ServerObject * const workerDroid = dynamic_cast<ServerObject *>(ServerWorld::findObjectByNetworkId(workerDroidId));
+		int itemRequestToken = 0;
+		if (workerDroid &&
+			workerDroid->isAuthoritative() &&
+			ContainerInterface::getTopmostContainer(*workerDroid) == actorObj &&
+			workerDroid->getScriptObject() &&
+			workerDroid->getScriptObject()->hasScript("item.droid.worker_droid") &&
+			workerDroid->getObjVars().getItem("precu.workerDroid.handoffToken", itemRequestToken) &&
+			itemRequestToken == playerRequestToken)
+		{
+			workerDroid->removeObjVarItem("precu.workerDroid.handoffToken");
+			workerDroidRequest = true;
+			responseId = workerDroidId;
+		}
+	}
+
 	NetworkId ownerId = actor;
 
 	// god mode can specify a different player to search for
-	if (isGod && !params.empty())
+	if (isGod && !workerDroidRequest && !params.empty())
 	{
 		ownerId = NetworkId(Unicode::wideToNarrow(params));
 		if (!ownerId.isValid())
@@ -930,7 +966,7 @@ static void commandFuncLocateStructure(Command const &, NetworkId const &actor, 
 	}
 
 	int const timeNow = static_cast<int>(::time(nullptr));
-	if (!isGod && actorObj->getObjVars().hasItem("timeNextLocateStructureCommandAllowed") && (actorObj->getObjVars().getType("timeNextLocateStructureCommandAllowed") == DynamicVariable::INT))
+	if (!isGod && !workerDroidRequest && actorObj->getObjVars().hasItem("timeNextLocateStructureCommandAllowed") && (actorObj->getObjVars().getType("timeNextLocateStructureCommandAllowed") == DynamicVariable::INT))
 	{
 		int timeNextLocateStructureCommandAllowed = 0;
 		if (actorObj->getObjVars().getItem("timeNextLocateStructureCommandAllowed", timeNextLocateStructureCommandAllowed))
@@ -952,9 +988,12 @@ static void commandFuncLocateStructure(Command const &, NetworkId const &actor, 
 	{
 		ownerResidenceId = actorObj->getHouse();
 
-		StringId::LocUnicodeString response;
-		if (StringId("player_structure", "locate_structure_command_executing").localize(response))
-			ConsoleMgr::broadcastString(Unicode::wideToNarrow(response), clientObj);
+		if (!workerDroidRequest)
+		{
+			StringId::LocUnicodeString response;
+			if (StringId("player_structure", "locate_structure_command_executing").localize(response))
+				ConsoleMgr::broadcastString(Unicode::wideToNarrow(response), clientObj);
+		}
 	}
 	else
 	{
@@ -963,10 +1002,14 @@ static void commandFuncLocateStructure(Command const &, NetworkId const &actor, 
 			clientObj);
 	}
 
-	GenericValueTypeMessage<std::pair<std::pair<uint32, bool>, std::pair<std::pair<NetworkId, NetworkId>, NetworkId> > > locateStructureByOwnerIdReq("LSBOIReq", std::make_pair(std::make_pair(GameServer::getInstance().getProcessId(), isGod), std::make_pair(std::make_pair(ownerId, ownerResidenceId), actor)));
+	// Worker Droid replies need object ids so the item can query only eligible
+	// installation scripts.  The response is routed to the droid, never printed
+	// to the client, and each target revalidates ownership before acting.
+	bool const includeObjectIds = isGod || workerDroidRequest;
+	GenericValueTypeMessage<std::pair<std::pair<uint32, bool>, std::pair<std::pair<NetworkId, NetworkId>, NetworkId> > > locateStructureByOwnerIdReq("LSBOIReq", std::make_pair(std::make_pair(GameServer::getInstance().getProcessId(), includeObjectIds), std::make_pair(std::make_pair(ownerId, ownerResidenceId), responseId)));
 	GameServer::getInstance().sendToCentralServer(locateStructureByOwnerIdReq);
 
-	if (!isGod)
+	if (!isGod && !workerDroidRequest)
 		IGNORE_RETURN(actorObj->setObjVarItem("timeNextLocateStructureCommandAllowed", (timeNow + ConfigServerGame::getLocateStructureCommandIntervalSeconds())));
 }
 
