@@ -20,6 +20,13 @@
 
 // ======================================================================
 
+namespace
+{
+	constexpr int cs_maximumFrameCount = 256;
+}
+
+// ======================================================================
+
 class SymbolCache
 {
 public:
@@ -690,23 +697,28 @@ void DebugHelp::getCallStack(uint64 *callStack, int sizeOfCallStack)
 	//   4-byte-per-entry array and overran the buffer by 2x. Capture into a
 	//   native pointer array and widen instead, which is correct for both
 	//   ILP32 and LP64.
-	enum { cs_maximumFrameCount = 256 };
-
 	if (sizeOfCallStack <= 0)
+	{
 		return;
+	}
 
 	for (int i = 0; i < sizeOfCallStack; ++i)
+	{
 		callStack[i] = 0;
+	}
 
-	if (sizeOfCallStack > static_cast<int>(cs_maximumFrameCount))
-		sizeOfCallStack = static_cast<int>(cs_maximumFrameCount);
+	if (sizeOfCallStack > cs_maximumFrameCount)
+	{
+		sizeOfCallStack = cs_maximumFrameCount;
+	}
 
 	void *frames[cs_maximumFrameCount];
 	int const frameCount = backtrace(frames, sizeOfCallStack);
 
 	for (int i = 0; i < frameCount; ++i)
+	{
 		callStack[i] = reinterpret_cast<uint64>(frames[i]);
+	}
 }
 
 // ======================================================================
-

@@ -48,7 +48,7 @@ bool TaskVerifyCharacter::process(DB::Session *session)
 	
 	for (std::vector<CharacterRecord*>::iterator i=m_characters.begin(); i!=m_characters.end(); ++i)
 	{
-		query.station_id = static_cast<long>((*i)->m_suid);
+		query.station_id = static_cast<long>(static_cast<int32>((*i)->m_suid));
 		query.character_id = (*i)->m_characterId;
 		LOG("TRACE_LOGIN", ("TaskVerifyCharacter(%d, %s) -- processing", (*i)->m_suid, (*i)->m_characterId.getValueString().c_str()));
 
