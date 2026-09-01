@@ -308,7 +308,8 @@ ObjvarBuffer::updateObjvars(const NetworkId &objectId, const std::vector <Dynami
                     // The packed-objvar case above leaves row at end().  Writing
                     // through it corrupts whatever follows the map's header node,
                     // which under LP64 is the next table buffer in SwgSnapshot.
-                    if (row != m_data.end()) {
+                    if (row != m_data.end())
+                    {
                         row->second.m_type = i->value.getType();
                         row->second.m_detached = true;
                     }
