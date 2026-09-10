@@ -1,6 +1,6 @@
 # Star Wars Galaxies Source Code (C++) Repository
 
-This is the main server code for SWGSource 1.2 as originally forked from the https://bitbucket.org/stellabellumswg/ repository.  Please see that repository for original publication and alteration credit.
+This is the main server code maintained by Galaxies Reborn as originally forked from the https://bitbucket.org/stellabellumswg/ repository.  Please see that repository for original publication and alteration credit.
 
 # Works in progress
 * 64-bit-types - fully 64 bit version (presently in testing - 11/12/2021) (Special thanks to Apathy for his help in making a 64 bit version happen!)
@@ -35,6 +35,6 @@ See http://clang.llvm.org/docs/UsersManual.html#profiling-with-instrumentation f
 
 # More Information
 
-See https://swg-source.github.io/ for more information on the SWG Source project.
+See https://github.com/Galaxies-Reborn for more information on the Galaxies Reborn project.
 
-Join the SWGSource Discord if you would like to contribute:  https://discord.gg/j53cMj9
+Submit contributions and questions to this Galaxies-Reborn repository.
