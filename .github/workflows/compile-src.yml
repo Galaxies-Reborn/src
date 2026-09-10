@@ -1,4 +1,4 @@
-name: SWG Source - Continuous Integration for src repo
+name: Galaxies Reborn - Continuous Integration for src repo
 
 on:
   pull_request:
