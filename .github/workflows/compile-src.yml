@@ -1,4 +1,4 @@
-name: SWG Source - Continuous Integration for src repo
+name: Galaxies Reborn - Continuous Integration for src repo
 
 on:
   pull_request:
@@ -14,7 +14,7 @@ jobs:
       - name: Run ANT Build
         run: |
           cd /home/swg/swg-main
-          git clone https://github.com/SWG-Source/src.git
+          git clone https://github.com/Galaxies-Reborn/src.git
           cd src
           ant build_src
           
