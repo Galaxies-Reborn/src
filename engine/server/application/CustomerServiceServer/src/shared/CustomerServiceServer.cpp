@@ -96,10 +96,6 @@ m_pendingTicketList(new PendingTicketList)
 
 	s_customerServiceServerMetricsData = new CustomerServiceServerMetricsData;
 	MetricsManager::install(s_customerServiceServerMetricsData, false, "CustomerServiceServer" , "", 0);
-	m_centralServerConnection = new CentralServerConnection(
-		ConfigCustomerServiceServer::getCentralServerAddress(),
-		ConfigCustomerServiceServer::getCentralServerPort());
-
 	m_callback->connect(*this, &CustomerServiceServer::onEnumerateServers);
 
 	char text[512];
@@ -113,9 +109,17 @@ m_pendingTicketList(new PendingTicketList)
 
 	m_csInterface.setMaxPacketsPerSecond(ConfigCustomerServiceServer::getMaxPacketsPerSecond());
 
-	m_csInterface.connectCSAssist(nullptr, 
-		Unicode::narrowToWide(ConfigCustomerServiceServer::getGameCode()).data(), 
-		Unicode::narrowToWide(ConfigCustomerServiceServer::getClusterName()).data());
+	if (ConfigCustomerServiceServer::getUseCsAssist())
+	{
+		m_csInterface.connectCSAssist(nullptr,
+			Unicode::narrowToWide(ConfigCustomerServiceServer::getGameCode()).data(),
+			Unicode::narrowToWide(ConfigCustomerServiceServer::getClusterName()).data());
+	}
+	else
+	{
+		REPORT_LOG(true, ("CustomerServiceServer running without CSAssist backend.\n"));
+		LOG("CSServer", ("CustomerServiceServer running without CSAssist backend."));
+	}
 
 	// Create the GameServer connection
 
@@ -130,6 +134,10 @@ m_pendingTicketList(new PendingTicketList)
 	setup.port = ConfigCustomerServiceServer::getChatServicePort();
 	setup.bindInterface = ConfigCustomerServiceServer::getChatServiceBindInterface();
 	m_chatServerService = new Service(ConnectionAllocator<ChatServerConnection>(), setup);
+
+	m_centralServerConnection = new CentralServerConnection(
+		ConfigCustomerServiceServer::getCentralServerAddress(),
+		ConfigCustomerServiceServer::getCentralServerPort());
 }
 
 //-----------------------------------------------------------------------
@@ -217,7 +225,9 @@ void CustomerServiceServer::run()
 
 void CustomerServiceServer::update()
 {
-	m_csInterface.Update();
+	if (ConfigCustomerServiceServer::getUseCsAssist())
+		m_csInterface.Update();
+
 	NetworkHandler::update();
 	NetworkHandler::dispatch();
 
@@ -496,6 +506,13 @@ void CustomerServiceServer::requestRegisterCharacter(const NetworkId &requester,
 	{
 		LOG("CSServer", ("CustomerServiceInterface::requestRegisterCharacter() - networkId(%s) suid(%i)", requester.getValueString().c_str(), suid));
 
+		if (!ConfigCustomerServiceServer::getUseCsAssist())
+		{
+			ConnectPlayerResponseMessage const message(CSASSIST_RESULT_SUCCESS);
+			m_csInterface.sendToClient(requester, message);
+			return;
+		}
+
 		NetworkId *tmpNetworkId = new NetworkId(requester);
 		m_csInterface.requestRegisterCharacter(reinterpret_cast<const void *>(tmpNetworkId), suid, nullptr, 0);
 	}
@@ -505,7 +522,10 @@ void CustomerServiceServer::requestRegisterCharacter(const NetworkId &requester,
 
 void CustomerServiceServer::requestUnRegisterCharacter(const NetworkId &requester)
 {
-	m_csInterface.requestUnRegisterCharacter(requester);
+	if (ConfigCustomerServiceServer::getUseCsAssist())
+		m_csInterface.requestUnRegisterCharacter(requester);
+	else
+		m_csInterface.removePlayer(requester);
 }
 
 //-----------------------------------------------------------------------

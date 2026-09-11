@@ -89,7 +89,6 @@ m_queryFetchCount(0)
 {
 	ExitChain::add(DatabaseProcess::remove,"DatabaseProcess::remove");
 
-	centralServerConnection = new CentralServerConnection(ConfigServerDatabase::getCentralServerAddress(), ConfigServerDatabase::getCentralServerPort());
 	NetworkSetupData setup;
 	setup.maxConnections = 300;
 	setup.port = 0;
@@ -154,6 +153,8 @@ m_queryFetchCount(0)
 	connectToMessage("CentralPingMessage");
 	connectToMessage("ExcommunicateGameServerMessage");
 
+	centralServerConnection = new CentralServerConnection(ConfigServerDatabase::getCentralServerAddress(), ConfigServerDatabase::getCentralServerPort());
+
 	m_metricsData = new DatabaseMetricsData;
 	MetricsManager::install(m_metricsData, false, "Database", "", 0);
 	ConsoleManager::install();
@@ -195,7 +196,9 @@ DatabaseProcess::~DatabaseProcess()
 void DatabaseProcess::run(void)
 {
 	static bool shouldSleep = ConfigServerDatabase::getShouldSleep();
-	bool idle=false;
+#ifdef _DEBUG
+	bool idle = false;
+#endif
 	int loopcount=0;
 	float nextQueryCountTime=0;
 
@@ -261,7 +264,7 @@ void DatabaseProcess::run(void)
 		if (Persister::getInstance().isIdle() && Loader::getInstance().isIdle() && DataLookup::getInstance().isIdle())
 		{
 			DEBUG_REPORT_LOG(ConfigServerDatabase::getReportSaveTimes() && !idle,("Database process is idle.\n"));
-			idle=true;
+			// idle=true;
 			if (taskService)
 			{
 				ServerIdleMessage msg(true);
@@ -270,7 +273,7 @@ void DatabaseProcess::run(void)
 		}
 		else
 		{
-			idle=false;
+			// idle=false;
 			if (taskService)
 			{
 				ServerIdleMessage msg(false);
@@ -422,6 +425,7 @@ void DatabaseProcess::receiveMessage(const MessageDispatch::Emitter & source, co
 			DEBUG_FATAL(centralServerConnection != &source,("Got CentralConnectionOpened from something other than our CentralServer connection.\n"));
 			
 			//TODO:  Make a DatabaseProcessConnect version of this message, perhaps ?
+			REPORT_LOG(true, ("DatabaseProcess advertising game service %s:%u\n", gameService->getBindAddress().c_str(), static_cast<unsigned int>(gameService->getBindPort())));
 			CentralGameServerConnect c("database", "127.0.0.1", 0, gameService->getBindAddress(), gameService->getBindPort()); 
 			centralServerConnection->send(c, true);
 			break;
