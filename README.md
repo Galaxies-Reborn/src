@@ -34,3 +34,7 @@ See http://clang.llvm.org/docs/UsersManual.html#profiling-with-instrumentation f
 See https://github.com/Galaxies-Reborn for more information on the Galaxies Reborn project.
 
 Submit contributions and questions to this Galaxies-Reborn repository.
+
+## Galaxies Reborn community
+
+Join the [Galaxies Reborn Discord](https://discord.gg/CEwKVvKxK5) for project discussion, support, and announcements.
