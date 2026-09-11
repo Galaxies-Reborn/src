@@ -1,9 +1,10 @@
 # Star Wars Galaxies Source Code (C++) Repository
 
-This is the main server code maintained by Galaxies Reborn as originally forked from the https://bitbucket.org/stellabellumswg/ repository.  Please see that repository for original publication and alteration credit.
+This repository contains the C++ server code maintained by Galaxies Reborn.
 
-# Works in progress
-* 64-bit-types - fully 64 bit version (presently in testing - 11/12/2021) (Special thanks to Apathy for his help in making a 64 bit version happen!)
+## Current development
+
+The primary branch is `main`. Follow the [Galaxies Reborn branch policy](https://github.com/Galaxies-Reborn/galaxies-reborn/blob/main/BRANCHES.md) for the maintained x64 server and feature efforts.
 
 # Building
 
